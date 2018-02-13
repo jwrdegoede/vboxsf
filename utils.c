@@ -41,6 +41,8 @@ void vboxsf_init_inode(struct sf_glob_info *sf_g, struct inode *inode,
 
 #undef mode_set
 
+	/* We use the host-side values for these */
+	inode->i_flags |= S_NOATIME | S_NOCMTIME;
 	inode->i_mapping->a_ops = &vboxsf_reg_aops;
 
 	if (SHFL_IS_DIRECTORY(attr->mode)) {
@@ -146,12 +148,16 @@ int vboxsf_inode_revalidate(struct dentry *dentry)
 	struct sf_glob_info *sf_g = GET_GLOB_INFO(dentry->d_sb);
 	struct sf_inode_info *sf_i;
 	struct shfl_fsobjinfo info;
+	struct timespec prev_mtime;
+	struct inode *inode;
 	int err;
 
 	if (!dentry || !d_really_is_positive(dentry))
 		return -EINVAL;
 
-	sf_i = GET_INODE_INFO(d_inode(dentry));
+	inode = d_inode(dentry);
+	prev_mtime = inode->i_mtime;
+	sf_i = GET_INODE_INFO(inode);
 	if (!sf_i->force_restat) {
 		if (time_before(jiffies, dentry->d_time + sf_g->ttl))
 			return 0;
@@ -163,7 +169,16 @@ int vboxsf_inode_revalidate(struct dentry *dentry)
 
 	dentry->d_time = jiffies;
 	sf_i->force_restat = 0;
-	vboxsf_init_inode(sf_g, d_inode(dentry), &info);
+	vboxsf_init_inode(sf_g, inode, &info);
+
+	/*
+	 * mmap()-ed files use the page-cache, if the file was changed on the
+	 * host side we need to invalidate the page-cache for it.  Note this
+	 * also gets triggered by our own writes, this is unavoidable.
+	 */
+	if (timespec_compare(&inode->i_mtime, &prev_mtime) > 0)
+		invalidate_mapping_pages(inode->i_mapping, 0, -1);
+
 	return 0;
 }
 
