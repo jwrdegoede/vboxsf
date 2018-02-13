@@ -23,24 +23,6 @@
  *   http://pserver.samba.org/samba/ftp/cifs-cvs/samplefs.tar.gz
  */
 
-static void sf_timespec_from_vbox(struct timespec *tv,
-				  const struct shfl_timespec *ts)
-{
-	s64 nsec, t = ts->ns_relative_to_unix_epoch;
-
-	nsec = do_div(t, 1000000000);
-	tv->tv_sec = t;
-	tv->tv_nsec = nsec;
-}
-
-static void sf_timespec_to_vbox(struct shfl_timespec *ts,
-				const struct timespec *tv)
-{
-	s64 t = (s64) tv->tv_nsec + (s64) tv->tv_sec * 1000000000;
-
-	ts->ns_relative_to_unix_epoch = t;
-}
-
 /* set [inode] attributes based on [info], uid/gid based on [sf_g] */
 void vboxsf_init_inode(struct sf_glob_info *sf_g, struct inode *inode,
 		       const struct shfl_fsobjinfo *info)
@@ -108,9 +90,12 @@ void vboxsf_init_inode(struct sf_glob_info *sf_g, struct inode *inode,
 	do_div(allocated, 512);
 	inode->i_blocks = allocated;
 
-	sf_timespec_from_vbox(&inode->i_atime, &info->access_time);
-	sf_timespec_from_vbox(&inode->i_ctime, &info->change_time);
-	sf_timespec_from_vbox(&inode->i_mtime, &info->modification_time);
+	inode->i_atime = ns_to_timespec(
+				 info->access_time.ns_relative_to_unix_epoch);
+	inode->i_ctime = ns_to_timespec(
+				 info->change_time.ns_relative_to_unix_epoch);
+	inode->i_mtime = ns_to_timespec(
+			   info->modification_time.ns_relative_to_unix_epoch);
 }
 
 int vboxsf_create_at_dentry(struct dentry *dentry,
@@ -256,12 +241,12 @@ int vboxsf_setattr(struct dentry *dentry, struct iattr *iattr)
 		}
 
 		if (iattr->ia_valid & ATTR_ATIME)
-			sf_timespec_to_vbox(&info.access_time,
-					    &iattr->ia_atime);
+			info.access_time.ns_relative_to_unix_epoch =
+					    timespec_to_ns(&iattr->ia_atime);
 
 		if (iattr->ia_valid & ATTR_MTIME)
-			sf_timespec_to_vbox(&info.modification_time,
-					    &iattr->ia_mtime);
+			info.modification_time.ns_relative_to_unix_epoch =
+					    timespec_to_ns(&iattr->ia_mtime);
 
 		/*
 		 * Ignore ctime (inode change time) as it can't be set
