@@ -254,8 +254,7 @@ static const struct dentry_operations sf_dentry_ops = {
  * [dentry] contains the name to be looked in the [parent] directory.
  * Failure to locate the name is not a "hard" error, in this case NULL
  * inode is added to [dentry] and vfs should proceed trying to create
- * the entry via other means. NULL(or "positive" pointer) ought to be
- * returned in case of success and "negative" pointer on error
+ * the entry via other means.
  * Return: NULL on success, ERR_PTR on failure.
  * @parent	inode of the dentry parent-directory
  * @dentry	dentry to populate

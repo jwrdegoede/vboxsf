@@ -277,7 +277,7 @@ static int sf_readpage(struct file *file, struct page *page)
 {
 	struct sf_glob_info *sf_g = GET_GLOB_INFO(file_inode(file)->i_sb);
 	struct sf_reg_info *sf_r = file->private_data;
-	u64 off = page_offset(page);
+	loff_t off = page_offset(page);
 	u32 nread = PAGE_SIZE;
 	u8 *buf;
 	int err;
@@ -300,20 +300,18 @@ static int sf_readpage(struct file *file, struct page *page)
 
 static int sf_writepage(struct page *page, struct writeback_control *wbc)
 {
-	struct address_space *mapping = page->mapping;
-	struct inode *inode = mapping->host;
+	struct inode *inode = page->mapping->host;
 	struct sf_glob_info *sf_g = GET_GLOB_INFO(inode->i_sb);
 	struct sf_inode_info *sf_i = GET_INODE_INFO(inode);
-	struct file *file = sf_i->file;
-	struct sf_reg_info *sf_r = file->private_data;
-	int end_index = inode->i_size >> PAGE_SHIFT;
-	u64 off = page_offset(page);
+	struct sf_reg_info *sf_r = sf_i->file->private_data;
+	loff_t off = page_offset(page);
+	loff_t size = i_size_read(inode);
 	u32 nwrite = PAGE_SIZE;
 	u8 *buf;
 	int err;
 
-	if (page->index >= end_index)
-		nwrite = inode->i_size & (PAGE_SIZE - 1);
+	if (off + PAGE_SIZE > size)
+		nwrite = size & ~PAGE_MASK;
 
 	buf = kmap(page);
 	err = vboxsf_write(sf_g->root, sf_r->handle, off, &nwrite, buf, false);
@@ -328,14 +326,6 @@ static int sf_writepage(struct page *page, struct writeback_control *wbc)
 	return err;
 }
 
-int sf_write_begin(struct file *file, struct address_space *mapping, loff_t pos,
-		   unsigned int len, unsigned int flags, struct page **pagep,
-		   void **fsdata)
-{
-	return simple_write_begin(file, mapping, pos, len, flags, pagep,
-				  fsdata);
-}
-
 int sf_write_end(struct file *file, struct address_space *mapping, loff_t pos,
 		 unsigned int len, unsigned int copied, struct page *page,
 		 void *fsdata)
@@ -343,14 +333,14 @@ int sf_write_end(struct file *file, struct address_space *mapping, loff_t pos,
 	struct inode *inode = mapping->host;
 	struct sf_glob_info *sf_g = GET_GLOB_INFO(inode->i_sb);
 	struct sf_reg_info *sf_r = file->private_data;
-	unsigned int from = pos & (PAGE_SIZE - 1);
+	unsigned int from = pos & ~PAGE_MASK;
 	u32 nwritten = len;
 	u8 *buf;
 	int err;
 
 	buf = kmap(page);
 	err = vboxsf_write(sf_g->root, sf_r->handle, pos, &nwritten,
-			  buf + from, false);
+			   buf + from, false);
 	kunmap(page);
 
 	if (err)
@@ -373,7 +363,7 @@ out:
 const struct address_space_operations vboxsf_reg_aops = {
 	.readpage = sf_readpage,
 	.writepage = sf_writepage,
-	.write_begin = sf_write_begin,
+	.write_begin = simple_write_begin,
 	.write_end = sf_write_end,
 };
 

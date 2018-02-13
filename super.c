@@ -28,7 +28,7 @@ module_param(follow_symlinks, int, 0444);
 MODULE_PARM_DESC(follow_symlinks,
 		 "Let host resolve symlinks rather than showing them");
 
-struct read_super_args {
+struct fill_super_args {
 	const char *dev_name;
 	char *options;
 };
@@ -138,9 +138,9 @@ out:
  * Called when vfs mounts the fs, should respect [flags],
  * initializes [sb], initializes root inode and dentry.
  */
-static int sf_read_super(struct super_block *sb, void *data, int flags)
+static int sf_fill_super(struct super_block *sb, void *data, int flags)
 {
-	struct read_super_args *args = data;
+	struct fill_super_args *args = data;
 	struct shfl_string root_path;
 	struct sf_glob_info *sf_g;
 	struct dentry *droot;
@@ -353,12 +353,12 @@ static struct super_operations sf_super_ops = {
 static struct dentry *sf_mount(struct file_system_type *fs_type, int flags,
 			       const char *dev_name, void *data)
 {
-	struct read_super_args args = {
+	struct fill_super_args args = {
 		.dev_name = dev_name,
 		.options = data,
 	};
 
-	return mount_nodev(fs_type, flags, &args, sf_read_super);
+	return mount_nodev(fs_type, flags, &args, sf_fill_super);
 }
 
 static struct file_system_type vboxsf_fs_type = {
