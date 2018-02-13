@@ -12,17 +12,6 @@
 #include <linux/vfs.h>
 #include "vfsmod.h"
 
-/*
- * vboxsf_reg_aops and sf_backing_dev_info are just quick implementations to
- * make sendfile work. For more information have a look at
- *
- *   http://us1.samba.org/samba/ftp/cifs-cvs/ols2006-fs-tutorial-smf.odp
- *
- * and the sample implementation
- *
- *   http://pserver.samba.org/samba/ftp/cifs-cvs/samplefs.tar.gz
- */
-
 /* set [inode] attributes based on [info], uid/gid based on [sf_g] */
 void vboxsf_init_inode(struct sf_glob_info *sf_g, struct inode *inode,
 		       const struct shfl_fsobjinfo *info)

@@ -202,65 +202,12 @@ static int sf_reg_release(struct inode *inode, struct file *file)
 	return 0;
 }
 
-static int sf_reg_fault(struct vm_fault *vmf)
-{
-	struct vm_area_struct *vma = vmf->vma;
-	struct file *file = vma->vm_file;
-	struct sf_glob_info *sf_g = GET_GLOB_INFO(file_inode(file)->i_sb);
-	struct sf_reg_info *sf_r = file->private_data;
-	u32 nread = PAGE_SIZE;
-	struct page *page;
-	u64 off;
-	u8 *buf;
-	int err;
-
-	if (vmf->pgoff > vma->vm_end)
-		return VM_FAULT_SIGBUS;
-
-	/* No GFP_HIGHUSER, the page must have a valid virtual address. */
-	page = alloc_page(GFP_USER);
-	if (!page)
-		return VM_FAULT_OOM;
-
-	buf = kmap(page);
-	off = (vmf->pgoff << PAGE_SHIFT);
-	err = vboxsf_read(sf_g->root, sf_r->handle, off, &nread, buf, false);
-	if (err) {
-		kunmap(page);
-		put_page(page);
-		return VM_FAULT_SIGBUS;
-	}
-
-	if (!nread)
-		clear_user_page(page_address(page), vmf->pgoff, page);
-	else
-		memset(buf + nread, 0, PAGE_SIZE - nread);
-
-	flush_dcache_page(page);
-	kunmap(page);
-	vmf->page = page;
-	return 0;
-}
-
-static const struct vm_operations_struct sf_vma_ops = {
-	.fault = sf_reg_fault
-};
-
-static int sf_reg_mmap(struct file *file, struct vm_area_struct *vma)
-{
-	if (vma->vm_flags & VM_SHARED)
-		return -EINVAL;
-
-	vma->vm_ops = &sf_vma_ops;
-	return 0;
-}
-
 const struct file_operations vboxsf_reg_fops = {
 	.read = sf_reg_read,
 	.open = sf_reg_open,
 	.write = sf_reg_write,
 	.release = sf_reg_release,
-	.mmap = sf_reg_mmap,
+	.mmap = generic_file_mmap,
 	.splice_read = generic_file_splice_read,
 	.read_iter = generic_file_read_iter,
 	.write_iter = generic_file_write_iter,
@@ -363,6 +310,7 @@ out:
 const struct address_space_operations vboxsf_reg_aops = {
 	.readpage = sf_readpage,
 	.writepage = sf_writepage,
+	.set_page_dirty = __set_page_dirty_nobuffers,
 	.write_begin = simple_write_begin,
 	.write_end = sf_write_end,
 };

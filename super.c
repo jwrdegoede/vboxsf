@@ -185,9 +185,13 @@ static int sf_fill_super(struct super_block *sb, void *data, int flags)
 		}
 	}
 
-	err = vboxsf_map_folder(sf_g->name, &sf_g->root);
+	err = super_setup_bdi_name(sb, "vboxsf-%s", args->dev_name);
 	if (err)
 		goto fail_free;
+
+	err = vboxsf_map_folder(sf_g->name, &sf_g->root);
+	if (err)
+		goto fail_put_bdi;
 
 	root_path.length = 1;
 	root_path.size = 2;
@@ -222,6 +226,8 @@ static int sf_fill_super(struct super_block *sb, void *data, int flags)
 
 fail_unmap:
 	vboxsf_unmap_folder(sf_g->root);
+fail_put_bdi:
+	bdi_put(sb->s_bdi);
 fail_free:
 	if (sf_g->nls)
 		unload_nls(sf_g->nls);
@@ -274,6 +280,7 @@ static void sf_put_super(struct super_block *sb)
 {
 	struct sf_glob_info *sf_g = GET_GLOB_INFO(sb);
 
+	generic_shutdown_super(sb);
 	vboxsf_unmap_folder(sf_g->root);
 	if (sf_g->nls)
 		unload_nls(sf_g->nls);
