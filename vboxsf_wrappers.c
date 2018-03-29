@@ -24,7 +24,7 @@ int vboxsf_connect(void)
 
 	gdev = vbg_get_gdev();
 	if (IS_ERR(gdev))
-		return VERR_NOT_SUPPORTED;	/* No guest-device */
+		return -ENODEV;	/* No guest-device */
 
 	err = vbg_hgcm_connect(gdev, &loc, &vboxsf_client_id, &vbox_status);
 	vbg_put_gdev(gdev);
@@ -52,7 +52,7 @@ static int vboxsf_call(u32 function, void *parms, u32 parm_count, int *status)
 
 	gdev = vbg_get_gdev();
 	if (IS_ERR(gdev))
-		return VERR_DEV_IO_ERROR; /* guest-dev removed underneath us */
+		return -ESHUTDOWN; /* guest-dev removed underneath us */
 
 	err = vbg_hgcm_call(gdev, vboxsf_client_id, function, U32_MAX,
 			    parms, parm_count, &vbox_status);

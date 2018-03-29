@@ -394,7 +394,9 @@ static int __init init(void)
 
 	err = vboxsf_connect();
 	if (err) {
-		vbg_err("vboxsf_connect error %d\n", err);
+		vbg_err("vboxsf: err %d connecting to guest PCI-device\n", err);
+		vbg_err("vboxsf: make sure you are inside a VirtualBox VM\n");
+		vbg_err("vboxsf: and check dmesg for vboxguest errors\n");
 		goto fail_unregisterfs;
 	}
 
