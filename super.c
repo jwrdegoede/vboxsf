@@ -18,6 +18,8 @@
 #include <linux/vbox_utils.h>
 #include "vfsmod.h"
 
+#define VBOXSF_SUPER_MAGIC 0xface
+
 #define VBSF_MOUNT_SIGNATURE_BYTE_0 ('\000')
 #define VBSF_MOUNT_SIGNATURE_BYTE_1 ('\377')
 #define VBSF_MOUNT_SIGNATURE_BYTE_2 ('\376')
@@ -201,7 +203,7 @@ static int sf_fill_super(struct super_block *sb, void *data, int flags)
 	if (err)
 		goto fail_unmap;
 
-	sb->s_magic = 0xface;
+	sb->s_magic = VBOXSF_SUPER_MAGIC;
 	sb->s_blocksize = 1024;
 	sb->s_maxbytes = MAX_LFS_FILESIZE;
 	sb->s_op = &sf_super_ops;
@@ -303,7 +305,7 @@ static int sf_statfs(struct dentry *dentry, struct kstatfs *stat)
 	if (err)
 		return err;
 
-	stat->f_type = NFS_SUPER_MAGIC;	/* XXX vboxsf type? */
+	stat->f_type = VBOXSF_SUPER_MAGIC;
 	stat->f_bsize = SHFLVolumeInfo.bytes_per_allocation_unit;
 
 	do_div(SHFLVolumeInfo.total_allocation_bytes,
