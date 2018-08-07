@@ -78,11 +78,11 @@ void vboxsf_init_inode(struct sf_glob_info *sf_g, struct inode *inode,
 	do_div(allocated, 512);
 	inode->i_blocks = allocated;
 
-	inode->i_atime = ns_to_timespec(
+	inode->i_atime = ns_to_timespec64(
 				 info->access_time.ns_relative_to_unix_epoch);
-	inode->i_ctime = ns_to_timespec(
+	inode->i_ctime = ns_to_timespec64(
 				 info->change_time.ns_relative_to_unix_epoch);
-	inode->i_mtime = ns_to_timespec(
+	inode->i_mtime = ns_to_timespec64(
 			   info->modification_time.ns_relative_to_unix_epoch);
 }
 
@@ -145,7 +145,7 @@ int vboxsf_inode_revalidate(struct dentry *dentry)
 	struct sf_glob_info *sf_g = GET_GLOB_INFO(dentry->d_sb);
 	struct sf_inode_info *sf_i;
 	struct shfl_fsobjinfo info;
-	struct timespec prev_mtime;
+	struct timespec64 prev_mtime;
 	struct inode *inode;
 	int err;
 
@@ -173,7 +173,7 @@ int vboxsf_inode_revalidate(struct dentry *dentry)
 	 * host side we need to invalidate the page-cache for it.  Note this
 	 * also gets triggered by our own writes, this is unavoidable.
 	 */
-	if (timespec_compare(&inode->i_mtime, &prev_mtime) > 0)
+	if (timespec64_compare(&inode->i_mtime, &prev_mtime) > 0)
 		invalidate_mapping_pages(inode->i_mapping, 0, -1);
 
 	return 0;
@@ -241,11 +241,11 @@ int vboxsf_setattr(struct dentry *dentry, struct iattr *iattr)
 
 		if (iattr->ia_valid & ATTR_ATIME)
 			info.access_time.ns_relative_to_unix_epoch =
-					    timespec_to_ns(&iattr->ia_atime);
+					    timespec64_to_ns(&iattr->ia_atime);
 
 		if (iattr->ia_valid & ATTR_MTIME)
 			info.modification_time.ns_relative_to_unix_epoch =
-					    timespec_to_ns(&iattr->ia_mtime);
+					    timespec64_to_ns(&iattr->ia_mtime);
 
 		/*
 		 * Ignore ctime (inode change time) as it can't be set
