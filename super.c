@@ -373,7 +373,7 @@ static struct file_system_type vboxsf_fs_type = {
 };
 
 /* Module initialization/finalization handlers */
-static int __init init(void)
+static int __init vboxsf_init(void)
 {
 	int err;
 
@@ -418,7 +418,7 @@ fail_unregisterfs:
 	return err;
 }
 
-static void __exit fini(void)
+static void __exit vboxsf_fini(void)
 {
 	vboxsf_disconnect();
 	unregister_filesystem(&vboxsf_fs_type);
@@ -430,8 +430,8 @@ static void __exit fini(void)
 	kmem_cache_destroy(sf_inode_cachep);
 }
 
-module_init(init);
-module_exit(fini);
+module_init(vboxsf_init);
+module_exit(vboxsf_fini);
 
 MODULE_DESCRIPTION("Oracle VM VirtualBox Module for Host File System Access");
 MODULE_AUTHOR("Oracle Corporation");
