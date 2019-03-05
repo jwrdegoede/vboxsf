@@ -35,6 +35,8 @@ struct fill_super_args {
 	char *options;
 };
 
+static DEFINE_MUTEX(vboxsf_setup_mutex);
+static bool vboxsf_setup_done;
 static struct super_operations sf_super_ops; /* forward declaration */
 static struct kmem_cache *sf_inode_cachep;
 
@@ -354,47 +356,31 @@ static struct super_operations sf_super_ops = {
 	.remount_fs	= sf_remount_fs
 };
 
-static struct dentry *sf_mount(struct file_system_type *fs_type, int flags,
-			       const char *dev_name, void *data)
-{
-	struct fill_super_args args = {
-		.dev_name = dev_name,
-		.options = data,
-	};
-
-	return mount_nodev(fs_type, flags, &args, sf_fill_super);
-}
-
-static struct file_system_type vboxsf_fs_type = {
-	.owner = THIS_MODULE,
-	.name = "vboxsf",
-	.mount = sf_mount,
-	.kill_sb = kill_anon_super
-};
-
-/* Module initialization/finalization handlers */
-static int __init vboxsf_init(void)
+static int vboxsf_setup(void)
 {
 	int err;
+
+	mutex_lock(&vboxsf_setup_mutex);
+
+	if (vboxsf_setup_done)
+		goto success;
 
 	sf_inode_cachep = kmem_cache_create("vboxsf_inode_cache",
 					     sizeof(struct sf_inode_info),
 					     0, (SLAB_RECLAIM_ACCOUNT|
 						SLAB_MEM_SPREAD|SLAB_ACCOUNT),
 					     sf_inode_init_once);
-	if (sf_inode_cachep == NULL)
-		return -ENOMEM;
-
-	err = register_filesystem(&vboxsf_fs_type);
-	if (err)
-		return err;
+	if (sf_inode_cachep == NULL) {
+		err = -ENOMEM;
+		goto fail_nomem;
+	}
 
 	err = vboxsf_connect();
 	if (err) {
 		vbg_err("vboxsf: err %d connecting to guest PCI-device\n", err);
 		vbg_err("vboxsf: make sure you are inside a VirtualBox VM\n");
 		vbg_err("vboxsf: and check dmesg for vboxguest errors\n");
-		goto fail_unregisterfs;
+		goto fail_free_cache;
 	}
 
 	err = vboxsf_set_utf8();
@@ -409,25 +395,64 @@ static int __init vboxsf_init(void)
 			vbg_warn("vboxsf: Unable to show symlinks: %d\n", err);
 	}
 
+	vboxsf_setup_done = true;
+success:
+	mutex_unlock(&vboxsf_setup_mutex);
 	return 0;
 
 fail_disconnect:
 	vboxsf_disconnect();
-fail_unregisterfs:
-	unregister_filesystem(&vboxsf_fs_type);
+fail_free_cache:
+	kmem_cache_destroy(sf_inode_cachep);
+fail_nomem:
+	mutex_unlock(&vboxsf_setup_mutex);
 	return err;
+}
+
+static struct dentry *sf_mount(struct file_system_type *fs_type, int flags,
+			       const char *dev_name, void *data)
+{
+	struct fill_super_args args = {
+		.dev_name = dev_name,
+		.options = data,
+	};
+	int err;
+
+	err = vboxsf_setup();
+	if (err)
+		return ERR_PTR(err);
+
+	return mount_nodev(fs_type, flags, &args, sf_fill_super);
+}
+
+static struct file_system_type vboxsf_fs_type = {
+	.owner = THIS_MODULE,
+	.name = "vboxsf",
+	.mount = sf_mount,
+	.kill_sb = kill_anon_super
+};
+
+/* Module initialization/finalization handlers */
+static int __init vboxsf_init(void)
+{
+	return register_filesystem(&vboxsf_fs_type);
 }
 
 static void __exit vboxsf_fini(void)
 {
-	vboxsf_disconnect();
 	unregister_filesystem(&vboxsf_fs_type);
-	/*
-	 * Make sure all delayed rcu free inodes are flushed before we
-	 * destroy cache.
-	 */
-	rcu_barrier();
-	kmem_cache_destroy(sf_inode_cachep);
+
+	mutex_lock(&vboxsf_setup_mutex);
+	if (vboxsf_setup_done) {
+		vboxsf_disconnect();
+		/*
+		 * Make sure all delayed rcu free inodes are flushed
+		 * before we destroy the cache.
+		 */
+		rcu_barrier();
+		kmem_cache_destroy(sf_inode_cachep);
+	}
+	mutex_unlock(&vboxsf_setup_mutex);
 }
 
 module_init(vboxsf_init);
