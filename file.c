@@ -1,8 +1,8 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: MIT
 /*
  * VirtualBox Guest Shared Folders support: Regular file inode and file ops.
  *
- * Copyright (C) 2006-2016 Oracle Corporation
+ * Copyright (C) 2006-2018 Oracle Corporation
  */
 
 #include <linux/sizes.h>

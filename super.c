@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: MIT
 /*
  * VirtualBox Guest Shared Folders support: Virtual File System.
  *
@@ -7,7 +7,7 @@
  * Superblock reading
  * Few utility functions
  *
- * Copyright (C) 2006-2016 Oracle Corporation
+ * Copyright (C) 2006-2018 Oracle Corporation
  */
 
 #include <linux/idr.h>

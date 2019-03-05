@@ -1,8 +1,8 @@
-// SPDX-License-Identifier: (GPL-2.0 OR CDDL-1.0)
+// SPDX-License-Identifier: MIT
 /*
  * Wrapper functions for the shfl host calls.
  *
- * Copyright (C) 2006-2016 Oracle Corporation
+ * Copyright (C) 2006-2018 Oracle Corporation
  */
 
 #include <linux/mm.h>
