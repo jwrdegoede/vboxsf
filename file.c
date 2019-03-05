@@ -302,8 +302,10 @@ int sf_write_end(struct file *file, struct address_space *mapping, loff_t pos,
 			   buf + from, false);
 	kunmap(page);
 
-	if (err)
+	if (err) {
+		nwritten = 0;
 		goto out;
+	}
 
 	/* mtime changed */
 	GET_INODE_INFO(inode)->force_restat = 1;
@@ -319,7 +321,7 @@ out:
 	unlock_page(page);
 	put_page(page);
 
-	return err;
+	return nwritten;
 }
 
 const struct address_space_operations vboxsf_reg_aops = {
