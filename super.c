@@ -10,6 +10,7 @@
  * Copyright (C) 2006-2016 Oracle Corporation
  */
 
+#include <linux/idr.h>
 #include <linux/magic.h>
 #include <linux/module.h>
 #include <linux/nls.h>
@@ -35,6 +36,7 @@ struct fill_super_args {
 	char *options;
 };
 
+static DEFINE_IDA(vboxsf_bdi_ida);
 static DEFINE_MUTEX(vboxsf_setup_mutex);
 static bool vboxsf_setup_done;
 static struct super_operations sf_super_ops; /* forward declaration */
@@ -168,6 +170,7 @@ static int sf_fill_super(struct super_block *sb, void *data, int flags)
 	/* ~0 means use whatever the host gives as mode info */
 	sf_g->dmode = ~0;
 	sf_g->fmode = ~0;
+	sf_g->bdi_id = -1;
 
 	err = vboxsf_parse_options(sf_g, args->options);
 	if (err)
@@ -186,7 +189,14 @@ static int sf_fill_super(struct super_block *sb, void *data, int flags)
 		}
 	}
 
-	err = super_setup_bdi_name(sb, "vboxsf-%s", args->dev_name);
+	sf_g->bdi_id = ida_simple_get(&vboxsf_bdi_ida, 0, 0, GFP_KERNEL);
+	if (sf_g->bdi_id < 0) {
+		err = sf_g->bdi_id;
+		goto fail_free;
+	}
+
+	err = super_setup_bdi_name(sb, "vboxsf-%s.%d", args->dev_name,
+				   sf_g->bdi_id);
 	if (err)
 		goto fail_free;
 
@@ -228,6 +238,8 @@ static int sf_fill_super(struct super_block *sb, void *data, int flags)
 fail_unmap:
 	vboxsf_unmap_folder(sf_g->root);
 fail_free:
+	if (sf_g->bdi_id >= 0)
+		ida_simple_remove(&vboxsf_bdi_ida, sf_g->bdi_id);
 	if (sf_g->nls)
 		unload_nls(sf_g->nls);
 	if (sf_g->nls_name != vboxsf_default_nls)
@@ -281,6 +293,8 @@ static void sf_put_super(struct super_block *sb)
 
 	generic_shutdown_super(sb);
 	vboxsf_unmap_folder(sf_g->root);
+	if (sf_g->bdi_id >= 0)
+		ida_simple_remove(&vboxsf_bdi_ida, sf_g->bdi_id);
 	if (sf_g->nls)
 		unload_nls(sf_g->nls);
 	if (sf_g->nls_name != vboxsf_default_nls)

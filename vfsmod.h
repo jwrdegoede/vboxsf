@@ -34,6 +34,7 @@ struct sf_glob_info {
 	int fmode;
 	int dmask;
 	int fmask;
+	int bdi_id;
 };
 
 /* per-inode information */
