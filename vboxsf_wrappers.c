@@ -11,6 +11,10 @@
 #include <linux/vbox_utils.h>
 #include "vfsmod.h"
 
+#define SHFL_REQUEST \
+	VMMDEV_REQUESTOR_KERNEL | VMMDEV_REQUESTOR_USR_DRV_OTHER | \
+	VMMDEV_REQUESTOR_CON_DONT_KNOW | VMMDEV_REQUESTOR_TRUST_NOT_GIVEN
+
 static u32 vboxsf_client_id;
 
 int vboxsf_connect(void)
@@ -26,7 +30,12 @@ int vboxsf_connect(void)
 	if (IS_ERR(gdev))
 		return -ENODEV;	/* No guest-device */
 
+#ifdef VMMDEV_REQUESTOR_KERNEL
+	err = vbg_hgcm_connect(gdev, SHFL_REQUEST, &loc,
+	                       &vboxsf_client_id, &vbox_status);
+#else
 	err = vbg_hgcm_connect(gdev, &loc, &vboxsf_client_id, &vbox_status);
+#endif
 	vbg_put_gdev(gdev);
 
 	return err ? err : vbg_status_code_to_errno(vbox_status);
@@ -41,7 +50,11 @@ void vboxsf_disconnect(void)
 	if (IS_ERR(gdev))
 		return;   /* guest-device is gone, already disconnected */
 
+#ifdef VMMDEV_REQUESTOR_KERNEL
+	vbg_hgcm_disconnect(gdev, SHFL_REQUEST, vboxsf_client_id, &vbox_status);
+#else
 	vbg_hgcm_disconnect(gdev, vboxsf_client_id, &vbox_status);
+#endif
 	vbg_put_gdev(gdev);
 }
 
@@ -54,8 +67,13 @@ static int vboxsf_call(u32 function, void *parms, u32 parm_count, int *status)
 	if (IS_ERR(gdev))
 		return -ESHUTDOWN; /* guest-dev removed underneath us */
 
+#ifdef VMMDEV_REQUESTOR_KERNEL
+	err = vbg_hgcm_call(gdev, SHFL_REQUEST, vboxsf_client_id, function,
+			    U32_MAX, parms, parm_count, &vbox_status);
+#else
 	err = vbg_hgcm_call(gdev, vboxsf_client_id, function, U32_MAX,
 			    parms, parm_count, &vbox_status);
+#endif
 	vbg_put_gdev(gdev);
 
 	if (err < 0)
