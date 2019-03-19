@@ -201,13 +201,16 @@ static int sf_fill_super(struct super_block *sb, void *data, int flags)
 		goto fail_free;
 
 	err = vboxsf_map_folder(sf_g->name, &sf_g->root);
-	if (err)
+	if (err) {
+		vbg_err("vboxsf: Host rejected mount of '%s' with error %d\n",
+			args->dev_name, err);
 		goto fail_free;
+	}
 
 	root_path.length = 1;
 	root_path.size = 2;
-	strlcpy(root_path.string.utf8, "/",
-		sizeof(root_path) - SHFLSTRING_HEADER_SIZE);
+	root_path.string.utf8[0] = '/';
+	root_path.string.utf8[1] = 0;
 	err = vboxsf_stat(sf_g, &root_path, &sf_g->root_info);
 	if (err)
 		goto fail_unmap;
