@@ -549,8 +549,10 @@ static int sf_symlink(struct inode *parent, struct dentry *dentry,
 	err = vboxsf_symlink(sf_g->root, path, ssymname, &info);
 	kfree(ssymname);
 	__putname(path);
-	if (err)
-		return err;
+	if (err) {
+		/* -EROFS means symlinks are note support -> -EPERM */
+		return (err == -EROFS) ? -EPERM : err;
+	}
 
 	err = sf_instantiate(parent, dentry, &info, SHFL_HANDLE_NIL);
 	if (err)
