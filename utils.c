@@ -184,8 +184,19 @@ int vboxsf_getattr(const struct path *path, struct kstat *kstat,
 {
 	int err;
 	struct dentry *dentry = path->dentry;
+	struct inode *inode = d_inode(dentry);
+	struct sf_inode_info *sf_i = GET_INODE_INFO(inode);
 
-	err = vboxsf_inode_revalidate(dentry);
+	switch (flags & AT_STATX_SYNC_TYPE) {
+	case AT_STATX_DONT_SYNC:
+		err = 0;
+		break;
+	case AT_STATX_FORCE_SYNC:
+		sf_i->force_restat = 1;
+		/* fall-through */
+	default:
+		err = vboxsf_inode_revalidate(dentry);
+	}
 	if (err)
 		return err;
 
