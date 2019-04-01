@@ -396,7 +396,8 @@ int vboxsf_nlscpy(struct sf_glob_info *sf_g, char *name, size_t name_bound_len,
 
 		out = name;
 		out_len = 0;
-		out_bound_len = name_bound_len;
+		/* Reserve space for terminating 0 */
+		out_bound_len = name_bound_len - 1;
 
 		while (in_bound_len) {
 			int nb;
