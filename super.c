@@ -19,7 +19,7 @@
 #include <linux/vbox_utils.h>
 #include "vfsmod.h"
 
-#define VBOXSF_SUPER_MAGIC 0xface
+#define VBOXSF_SUPER_MAGIC 0x786f4256 /* 'VBox' little endian */
 
 #define VBSF_MOUNT_SIGNATURE_BYTE_0 ('\000')
 #define VBSF_MOUNT_SIGNATURE_BYTE_1 ('\377')
@@ -338,7 +338,7 @@ static int sf_statfs(struct dentry *dentry, struct kstatfs *stat)
 	 * Don't return 0 here since the guest may then think that it is not
 	 * possible to create any more files.
 	 */
-	stat->f_ffree = 1000;
+	stat->f_ffree = 1000000;
 	stat->f_fsid.val[0] = 0;
 	stat->f_fsid.val[1] = 0;
 	stat->f_namelen = 255;
