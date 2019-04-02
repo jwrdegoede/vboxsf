@@ -110,9 +110,9 @@ int vboxsf_rename(u32 root, struct shfl_string *src_path,
 		  struct shfl_string *dest_path, u32 flags);
 
 int vboxsf_read(u32 root, u64 handle, u64 offset,
-		u32 *buf_len, u8 *buf, bool user);
+		u32 *buf_len, uintptr_t buf, bool user);
 int vboxsf_write(u32 root, u64 handle, u64 offset,
-		 u32 *buf_len, const u8 *buf, bool user);
+		 u32 *buf_len, uintptr_t buf, bool user);
 
 int vboxsf_dirinfo(u32 root, u64 handle,
 		   struct shfl_string *parsed_path, u32 flags, u32 index,

@@ -20,7 +20,7 @@
  * @size	length of the buffer
  * @off		offset within the file
  */
-static ssize_t sf_reg_read(struct file *file, char *buf, size_t size,
+static ssize_t sf_reg_read(struct file *file, char __user *buf, size_t size,
 			   loff_t *off)
 {
 	struct sf_glob_info *sf_g = GET_GLOB_INFO(file_inode(file)->i_sb);
@@ -37,7 +37,8 @@ static ssize_t sf_reg_read(struct file *file, char *buf, size_t size,
 	else
 		nread = size;
 
-	err = vboxsf_read(sf_g->root, sf_r->handle, pos, &nread, buf, true);
+	err = vboxsf_read(sf_g->root, sf_r->handle, pos, &nread,
+			  (uintptr_t)buf, true);
 	if (err)
 		return err;
 
@@ -53,8 +54,8 @@ static ssize_t sf_reg_read(struct file *file, char *buf, size_t size,
  * @size	length of the buffer
  * @off		offset within the file
  */
-static ssize_t sf_reg_write(struct file *file, const char *buf, size_t size,
-			    loff_t *off)
+static ssize_t sf_reg_write(struct file *file, const char __user *buf,
+			    size_t size, loff_t *off)
 {
 	struct inode *inode = file_inode(file);
 	struct sf_inode_info *sf_i = GET_INODE_INFO(inode);
@@ -83,7 +84,8 @@ static ssize_t sf_reg_write(struct file *file, const char *buf, size_t size,
 	if (err)
 		return err;
 
-	err = vboxsf_write(sf_g->root, sf_r->handle, pos, &nwritten, buf, true);
+	err = vboxsf_write(sf_g->root, sf_r->handle, pos, &nwritten,
+			   (uintptr_t)buf, true);
 	if (err)
 		return err;
 
@@ -244,7 +246,8 @@ static int sf_readpage(struct file *file, struct page *page)
 
 	buf = kmap(page);
 
-	err = vboxsf_read(sf_g->root, sf_r->handle, off, &nread, buf, false);
+	err = vboxsf_read(sf_g->root, sf_r->handle, off, &nread,
+			  (uintptr_t)buf, false);
 	if (err == 0) {
 		memset(&buf[nread], 0, PAGE_SIZE - nread);
 		flush_dcache_page(page);
@@ -274,7 +277,8 @@ static int sf_writepage(struct page *page, struct writeback_control *wbc)
 		nwrite = size & ~PAGE_MASK;
 
 	buf = kmap(page);
-	err = vboxsf_write(sf_g->root, sf_r->handle, off, &nwrite, buf, false);
+	err = vboxsf_write(sf_g->root, sf_r->handle, off, &nwrite,
+			   (uintptr_t)buf, false);
 	kunmap(page);
 
 	if (err == 0) {
@@ -289,9 +293,9 @@ static int sf_writepage(struct page *page, struct writeback_control *wbc)
 	return err;
 }
 
-int sf_write_end(struct file *file, struct address_space *mapping, loff_t pos,
-		 unsigned int len, unsigned int copied, struct page *page,
-		 void *fsdata)
+static int sf_write_end(struct file *file, struct address_space *mapping,
+			loff_t pos, unsigned int len, unsigned int copied,
+			struct page *page, void *fsdata)
 {
 	struct inode *inode = mapping->host;
 	struct sf_glob_info *sf_g = GET_GLOB_INFO(inode->i_sb);
@@ -303,7 +307,7 @@ int sf_write_end(struct file *file, struct address_space *mapping, loff_t pos,
 
 	buf = kmap(page);
 	err = vboxsf_write(sf_g->root, sf_r->handle, pos, &nwritten,
-			   buf + from, false);
+			   (uintptr_t)buf + from, false);
 	kunmap(page);
 
 	if (err) {
