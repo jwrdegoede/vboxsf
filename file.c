@@ -5,6 +5,10 @@
  * Copyright (C) 2006-2018 Oracle Corporation
  */
 
+#include <linux/mm.h>
+#include <linux/page-flags.h>
+#include <linux/pagemap.h>
+#include <linux/highmem.h>
 #include <linux/sizes.h>
 #include "vfsmod.h"
 
