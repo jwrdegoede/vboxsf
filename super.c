@@ -39,7 +39,7 @@ struct fill_super_args {
 static DEFINE_IDA(vboxsf_bdi_ida);
 static DEFINE_MUTEX(vboxsf_setup_mutex);
 static bool vboxsf_setup_done;
-static struct super_operations sf_super_ops; /* forward declaration */
+static struct super_operations vboxsf_super_ops; /* forward declaration */
 static struct kmem_cache *sf_inode_cachep;
 
 static char * const vboxsf_default_nls = CONFIG_NLS_DEFAULT;
@@ -158,6 +158,10 @@ static int sf_fill_super(struct super_block *sb, void *data, int flags)
 	if (!sf_g)
 		return -ENOMEM;
 
+	idr_init(&sf_g->ino_idr);
+	spin_lock_init(&sf_g->ino_idr_lock);
+	sf_g->next_generation = 1;
+
 	/* Turn dev_name into a shfl_string */
 	size = strlen(args->dev_name) + 1;
 	sf_g->name = kmalloc(SHFLSTRING_HEADER_SIZE + size, GFP_KERNEL);
@@ -218,7 +222,8 @@ static int sf_fill_super(struct super_block *sb, void *data, int flags)
 	sb->s_magic = VBOXSF_SUPER_MAGIC;
 	sb->s_blocksize = 1024;
 	sb->s_maxbytes = MAX_LFS_FILESIZE;
-	sb->s_op = &sf_super_ops;
+	sb->s_op = &vboxsf_super_ops;
+	sb->s_d_op = &vboxsf_dentry_ops;
 
 	iroot = iget_locked(sb, 0);
 	if (!iroot) {
@@ -276,7 +281,11 @@ static struct inode *sf_alloc_inode(struct super_block *sb)
 static void sf_i_callback(struct rcu_head *head)
 {
 	struct inode *inode = container_of(head, struct inode, i_rcu);
+	struct sf_glob_info *sf_g = GET_GLOB_INFO(inode->i_sb);
 
+	spin_lock(&sf_g->ino_idr_lock);
+	idr_remove(&sf_g->ino_idr, inode->i_ino);
+	spin_unlock(&sf_g->ino_idr_lock);
 	kmem_cache_free(sf_inode_cachep, GET_INODE_INFO(inode));
 }
 
@@ -295,6 +304,7 @@ static void sf_put_super(struct super_block *sb)
 
 	generic_shutdown_super(sb);
 	vboxsf_unmap_folder(sf_g->root);
+	idr_destroy(&sf_g->ino_idr);
 	if (sf_g->bdi_id >= 0)
 		ida_simple_remove(&vboxsf_bdi_ida, sf_g->bdi_id);
 	if (sf_g->nls)
@@ -364,7 +374,7 @@ static int sf_remount_fs(struct super_block *sb, int *flags, char *options)
 	return 0;
 }
 
-static struct super_operations sf_super_ops = {
+static struct super_operations vboxsf_super_ops = {
 	.alloc_inode	= sf_alloc_inode,
 	.destroy_inode	= sf_destroy_inode,
 	.put_super	= sf_put_super,

@@ -9,6 +9,7 @@
 #define VFSMOD_H
 
 #include <linux/backing-dev.h>
+#include <linux/idr.h>
 #include <linux/version.h>
 #include "shfl_hostintf.h"
 
@@ -22,8 +23,11 @@
 /* per-shared folder information */
 struct sf_glob_info {
 	struct shfl_fsobjinfo root_info;
-	struct nls_table *nls;
+	struct idr ino_idr;
+	struct spinlock ino_idr_lock;
+	u32 next_generation;
 	u32 root;
+	struct nls_table *nls;
 	/* mount options */
 	struct shfl_string *name;
 	char *nls_name;
@@ -70,8 +74,10 @@ extern const struct inode_operations vboxsf_reg_iops;
 extern const struct file_operations vboxsf_dir_fops;
 extern const struct file_operations vboxsf_reg_fops;
 extern const struct address_space_operations vboxsf_reg_aops;
+extern const struct dentry_operations vboxsf_dentry_ops;
 
 /* from utils.c */
+struct inode *vboxsf_new_inode(struct super_block *sb);
 void vboxsf_init_inode(struct sf_glob_info *sf_g, struct inode *inode,
 		       const struct shfl_fsobjinfo *info);
 int vboxsf_create_at_dentry(struct dentry *dentry,

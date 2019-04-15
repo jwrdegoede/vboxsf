@@ -12,6 +12,37 @@
 #include <linux/vfs.h>
 #include "vfsmod.h"
 
+struct inode *vboxsf_new_inode(struct super_block *sb)
+{
+	struct sf_glob_info *sf_g = GET_GLOB_INFO(sb);
+	struct inode *inode;
+	int cursor, ret;
+	u32 gen;
+
+	inode = new_inode(sb);
+	if (!inode)
+		return ERR_PTR(-ENOMEM);
+
+	idr_preload(GFP_KERNEL);
+	spin_lock(&sf_g->ino_idr_lock);
+	cursor = idr_get_cursor(&sf_g->ino_idr);
+	ret = idr_alloc_cyclic(&sf_g->ino_idr, inode, 1, 0, GFP_ATOMIC);
+	if (ret >= 0 && ret < cursor)
+		sf_g->next_generation++;
+	gen = sf_g->next_generation;
+	spin_unlock(&sf_g->ino_idr_lock);
+	idr_preload_end();
+
+	if (ret < 0) {
+		iput(inode);
+		return ERR_PTR(ret);
+	}
+
+	inode->i_ino = ret;
+	inode->i_generation = gen;
+	return inode;
+}
+
 /* set [inode] attributes based on [info], uid/gid based on [sf_g] */
 void vboxsf_init_inode(struct sf_glob_info *sf_g, struct inode *inode,
 		       const struct shfl_fsobjinfo *info)

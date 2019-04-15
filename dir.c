@@ -238,7 +238,7 @@ static int sf_dentry_revalidate(struct dentry *dentry, unsigned int flags)
 		return vboxsf_stat_dentry(dentry, NULL) == -ENOENT;
 }
 
-static const struct dentry_operations sf_dentry_ops = {
+const struct dentry_operations vboxsf_dentry_ops = {
 	.d_revalidate = sf_dentry_revalidate
 };
 
@@ -259,39 +259,23 @@ static const struct dentry_operations sf_dentry_ops = {
 static struct dentry *sf_lookup(struct inode *parent, struct dentry *dentry,
 				unsigned int flags)
 {
+	struct sf_glob_info *sf_g = GET_GLOB_INFO(parent->i_sb);
 	struct shfl_fsobjinfo fsinfo;
-	struct sf_inode_info *sf_i;
-	struct sf_glob_info *sf_g;
 	struct inode *inode;
-	ino_t ino;
 	int err;
 
-	sf_g = GET_GLOB_INFO(parent->i_sb);
-	sf_i = GET_INODE_INFO(parent);
+	dentry->d_time = jiffies;
 
 	err = vboxsf_stat_dentry(dentry, &fsinfo);
 	if (err) {
-		if (err != -ENOENT)
-			return ERR_PTR(err);
-		/*
-		 * -ENOENT: add NULL inode to dentry so it later can
-		 * be created via call to create/mkdir/open
-		 */
-		inode = NULL;
+		inode = (err == -ENOENT) ? NULL : ERR_PTR(err);
 	} else {
-		ino = iunique(parent->i_sb, 1);
-		inode = iget_locked(parent->i_sb, ino);
-		if (!inode)
-			return ERR_PTR(-ENOMEM);
-
-		vboxsf_init_inode(sf_g, inode, &fsinfo);
-		unlock_new_inode(inode);
+		inode = vboxsf_new_inode(parent->i_sb);
+		if (!IS_ERR(inode))
+			vboxsf_init_inode(sf_g, inode, &fsinfo);
 	}
 
-	dentry->d_time = jiffies;
-	d_set_d_op(dentry, &sf_dentry_ops);
-	d_add(dentry, inode);
-	return NULL;
+	return d_splice_alias(inode, dentry);
 }
 
 /**
@@ -309,12 +293,10 @@ static int sf_instantiate(struct inode *parent, struct dentry *dentry,
 	struct sf_glob_info *sf_g = GET_GLOB_INFO(parent->i_sb);
 	struct sf_inode_info *sf_i;
 	struct inode *inode;
-	ino_t ino;
 
-	ino = iunique(parent->i_sb, 1);
-	inode = iget_locked(parent->i_sb, ino);
-	if (!inode)
-		return -ENOMEM;
+	inode = vboxsf_new_inode(parent->i_sb);
+	if (IS_ERR(inode))
+		return PTR_ERR(inode);
 
 	sf_i = GET_INODE_INFO(inode);
 	/* the host may have given us different attr then requested */
@@ -322,7 +304,6 @@ static int sf_instantiate(struct inode *parent, struct dentry *dentry,
 	vboxsf_init_inode(sf_g, inode, info);
 
 	d_instantiate(dentry, inode);
-	unlock_new_inode(inode);
 
 	return 0;
 }
