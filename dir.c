@@ -114,25 +114,29 @@ static int sf_get_d_type(u32 mode)
  * @d_name	Buffer in which to return element name
  * @d_type	Buffer in which to return element file-type
  */
-static int sf_getdent(struct file *dir, char d_name[NAME_MAX], int *d_type)
+static int sf_getdent(struct file *dir, loff_t pos,
+		      char d_name[NAME_MAX], int *d_type)
 {
 	struct sf_glob_info *sf_g = GET_GLOB_INFO(file_inode(dir)->i_sb);
 	struct sf_dir_info *sf_d = dir->private_data;
-	struct list_head *pos;
-	loff_t cur = 0;
+	struct shfl_dirinfo *info;
+	struct sf_dir_buf *b;
+	loff_t i, cur = 0;
 
-	list_for_each(pos, &sf_d->info_list) {
-		struct shfl_dirinfo *info;
-		struct sf_dir_buf *b;
-		loff_t i;
-
-		b = list_entry(pos, struct sf_dir_buf, head);
-		if (dir->f_pos >= cur + b->entries) {
+	list_for_each_entry(b, &sf_d->info_list, head) {
+		if (pos >= cur + b->entries) {
 			cur += b->entries;
 			continue;
 		}
 
-		for (i = 0, info = b->buf; i < dir->f_pos - cur; ++i) {
+		/*
+		 * Note the sf_dir_info objects we are iterating over here
+		 * are variable sized, so the info pointer may end up being
+		 * unaligned. This is how we get the data from the host.
+		 * Since vboxsf is only supported on x86 machines this is not
+		 * a problem.
+		 */
+		for (i = 0, info = b->buf; i < pos - cur; ++i) {
 			size_t size;
 
 			size = offsetof(struct shfl_dirinfo, name.string) +
@@ -184,18 +188,11 @@ static int sf_dir_iterate(struct file *dir, struct dir_context *ctx)
 		char d_name[NAME_MAX];
 		int d_type = DT_UNKNOWN;
 
-		err = sf_getdent(dir, d_name, &d_type);
-		switch (err) {
-		case 1:
-			return 0;
-
-		case 0:
-			break;
-
-		case -1:
-		default:
+		err = sf_getdent(dir, ctx->pos, d_name, &d_type);
+		if (unlikely(err)) { /* EOF or an error */
+			if (err == 1)
+				return 0;
 			/* skip erroneous entry and proceed */
-			dir->f_pos += 1;
 			ctx->pos += 1;
 			continue;
 		}
@@ -214,7 +211,6 @@ static int sf_dir_iterate(struct file *dir, struct dir_context *ctx)
 		if (!dir_emit(ctx, d_name, strlen(d_name), fake_ino, d_type))
 			return 0;
 
-		dir->f_pos += 1;
 		ctx->pos += 1;
 	}
 }
