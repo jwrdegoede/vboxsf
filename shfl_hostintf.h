@@ -86,7 +86,7 @@ struct shfl_string {
 
 	/** UTF-8 or UTF-16 string. Nul terminated. */
 	union {
-		u8 utf8[1];
+		u8 utf8[2];
 		u16 utf16[1];
 		u16 ucs2[1]; /* misnomer, use utf16. */
 	} string;
