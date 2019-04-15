@@ -119,15 +119,6 @@ static int sf_reg_open(struct inode *inode, struct file *file)
 	if (!sf_r)
 		return -ENOMEM;
 
-	/* Already open? */
-	if (sf_i->handle != SHFL_HANDLE_NIL) {
-		sf_r->handle = sf_i->handle;
-		sf_i->handle = SHFL_HANDLE_NIL;
-		sf_i->file = file;
-		file->private_data = sf_r;
-		return 0;
-	}
-
 	/*
 	 * We check the value of params.handle afterwards to find out if
 	 * the call succeeded or failed, as the API does not seem to cleanly
@@ -212,7 +203,6 @@ static int sf_reg_release(struct inode *inode, struct file *file)
 
 	kfree(sf_r);
 	sf_i->file = NULL;
-	sf_i->handle = SHFL_HANDLE_NIL;
 	file->private_data = NULL;
 	return 0;
 }

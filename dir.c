@@ -302,10 +302,9 @@ static struct dentry *sf_lookup(struct inode *parent, struct dentry *dentry,
  * @parent	inode entry of the directory
  * @dentry	directory cache entry
  * @info	file information
- * @handle	handle
  */
 static int sf_instantiate(struct inode *parent, struct dentry *dentry,
-			  struct shfl_fsobjinfo *info, u64 handle)
+			  struct shfl_fsobjinfo *info)
 {
 	struct sf_glob_info *sf_g = GET_GLOB_INFO(parent->i_sb);
 	struct sf_inode_info *sf_i;
@@ -314,16 +313,12 @@ static int sf_instantiate(struct inode *parent, struct dentry *dentry,
 
 	ino = iunique(parent->i_sb, 1);
 	inode = iget_locked(parent->i_sb, ino);
-	if (!inode) {
-		if (handle != SHFL_HANDLE_NIL)
-			vboxsf_close(sf_g->root, handle);
+	if (!inode)
 		return -ENOMEM;
-	}
 
 	sf_i = GET_INODE_INFO(inode);
 	/* the host may have given us different attr then requested */
 	sf_i->force_restat = 1;
-	sf_i->handle = handle;
 	vboxsf_init_inode(sf_g, inode, info);
 
 	d_instantiate(dentry, inode);
@@ -365,22 +360,15 @@ static int sf_create_aux(struct inode *parent, struct dentry *dentry,
 	if (params.result != SHFL_FILE_CREATED)
 		return -EPERM;
 
-	if (is_dir) {
-		vboxsf_close(sf_g->root, params.handle);
-		params.handle = SHFL_HANDLE_NIL;
-	}
+	vboxsf_close(sf_g->root, params.handle);
 
-	err = sf_instantiate(parent, dentry, &params.info, params.handle);
+	err = sf_instantiate(parent, dentry, &params.info);
 	if (err)
 		return err;
 
 	/* parent directory access/change time changed */
 	sf_parent_i->force_restat = 1;
 
-	/*
-	 * We leave the handle open. We assume that the same file is opened
-	 * with sf_reg_open() and later closed with sf_reg_close().
-	 */
 	return 0;
 }
 
@@ -550,7 +538,7 @@ static int sf_symlink(struct inode *parent, struct dentry *dentry,
 		return (err == -EROFS) ? -EPERM : err;
 	}
 
-	err = sf_instantiate(parent, dentry, &info, SHFL_HANDLE_NIL);
+	err = sf_instantiate(parent, dentry, &info);
 	if (err)
 		return err;
 

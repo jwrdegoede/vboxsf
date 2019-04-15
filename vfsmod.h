@@ -43,11 +43,6 @@ struct sf_inode_info {
 	int force_restat;
 	/* file structure, only valid between open() and release() */
 	struct file *file;
-	/*
-	 * handle valid if a file was created with sf_create_aux until it
-	 * will be opened with sf_reg_open()
-	 */
-	u64 handle;
 	/* The VFS inode struct */
 	struct inode vfs_inode;
 };

@@ -269,7 +269,6 @@ static struct inode *sf_alloc_inode(struct super_block *sb)
 
 	sf_i->force_restat = 0;
 	sf_i->file = NULL;
-	sf_i->handle = SHFL_HANDLE_NIL;
 
 	return &sf_i->vfs_inode;
 }
