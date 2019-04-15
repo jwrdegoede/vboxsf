@@ -428,7 +428,7 @@ static int sf_unlink_aux(struct inode *parent, struct dentry *dentry,
 	int err;
 
 	flags = is_dir ? SHFL_REMOVE_DIR : SHFL_REMOVE_FILE;
-	if (inode && (inode->i_mode & S_IFLNK) == S_IFLNK)
+	if ((inode->i_mode & S_IFLNK) == S_IFLNK)
 		flags |= SHFL_REMOVE_SYMLINK;
 
 	path = vboxsf_path_from_dentry(sf_g, dentry);
