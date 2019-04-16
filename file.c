@@ -65,11 +65,10 @@ static ssize_t sf_reg_write(struct file *file, const char __user *buf,
 	u64 pos;
 	int err;
 
-	pos = *off;
-	if (file->f_flags & O_APPEND) {
-		pos = inode->i_size;
-		*off = pos;
-	}
+	if (file->f_flags & O_APPEND)
+		pos = i_size_read(inode);
+	else
+		pos = *off;
 
 	if (!size)
 		return 0;
@@ -89,16 +88,17 @@ static ssize_t sf_reg_write(struct file *file, const char __user *buf,
 	if (err)
 		return err;
 
-	*off += nwritten;
-	if (*off > inode->i_size)
-		i_size_write(inode, *off);
+	if (pos + nwritten > i_size_read(inode))
+		i_size_write(inode, pos + nwritten);
 
 	/* Invalidate page-cache so that mmap using apps see the changes too */
 	invalidate_mapping_pages(inode->i_mapping, pos >> PAGE_SHIFT,
-				 *off >> PAGE_SHIFT);
+				 (pos + nwritten) >> PAGE_SHIFT);
 
 	/* mtime changed */
 	sf_i->force_restat = 1;
+
+	*off = pos + nwritten;
 	return nwritten;
 }
 
