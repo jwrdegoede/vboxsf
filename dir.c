@@ -460,9 +460,6 @@ static int sf_rename(struct inode *old_parent, struct dentry *old_dentry,
 	if (flags)
 		return -EINVAL;
 
-	if (sf_g != GET_GLOB_INFO(new_parent->i_sb))
-		return -EINVAL;
-
 	old_path = vboxsf_path_from_dentry(sf_g, old_dentry);
 	if (IS_ERR(old_path))
 		return PTR_ERR(old_path);
