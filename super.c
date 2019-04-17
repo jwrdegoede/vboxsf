@@ -261,6 +261,7 @@ static void sf_inode_init_once(void *data)
 {
 	struct sf_inode_info *sf_i = (struct sf_inode_info *)data;
 
+	mutex_init(&sf_i->handle_list_mutex);
 	inode_init_once(&sf_i->vfs_inode);
 }
 
@@ -273,7 +274,7 @@ static struct inode *sf_alloc_inode(struct super_block *sb)
 		return NULL;
 
 	sf_i->force_restat = 0;
-	sf_i->file = NULL;
+	INIT_LIST_HEAD(&sf_i->handle_list);
 
 	return &sf_i->vfs_inode;
 }

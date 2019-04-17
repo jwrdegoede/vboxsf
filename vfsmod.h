@@ -45,8 +45,9 @@ struct sf_glob_info {
 struct sf_inode_info {
 	/* some information was changed, update data on next revalidate */
 	int force_restat;
-	/* file structure, only valid between open() and release() */
-	struct file *file;
+	/* list of open handles for this inode + lock protecting it */
+	struct list_head handle_list;
+	struct mutex handle_list_mutex;
 	/* The VFS inode struct */
 	struct inode vfs_inode;
 };
@@ -61,10 +62,6 @@ struct sf_dir_buf {
 	size_t used;
 	void *buf;
 	struct list_head head;
-};
-
-struct sf_reg_info {
-	u64 handle;
 };
 
 /* globals */
