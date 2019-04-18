@@ -24,7 +24,7 @@
 struct sf_glob_info {
 	struct shfl_fsobjinfo root_info;
 	struct idr ino_idr;
-	struct spinlock ino_idr_lock;
+	spinlock_t ino_idr_lock;
 	u32 next_generation;
 	u32 root;
 	struct nls_table *nls;
