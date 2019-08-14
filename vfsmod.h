@@ -18,7 +18,7 @@
 /* The cast is to prevent assignment of void * to pointers of arbitrary type */
 #define GET_GLOB_INFO(sb)       ((struct sf_glob_info *)(sb)->s_fs_info)
 #define SET_GLOB_INFO(sb, sf_g) ((sb)->s_fs_info = (sf_g))
-#define GET_INODE_INFO(i)       container_of(i, struct sf_inode_info, vfs_inode)
+#define GET_INODE_INFO(i)       container_of(i, struct vboxsf_inode, vfs_inode)
 
 struct vboxsf_options {
 	unsigned long ttl;
@@ -50,7 +50,7 @@ struct sf_glob_info {
 };
 
 /* per-inode information */
-struct sf_inode_info {
+struct vboxsf_inode {
 	/* some information was changed, update data on next revalidate */
 	int force_restat;
 	/* list of open handles for this inode + lock protecting it */
@@ -60,11 +60,11 @@ struct sf_inode_info {
 	struct inode vfs_inode;
 };
 
-struct sf_dir_info {
+struct vboxsf_dir_info {
 	struct list_head info_list;
 };
 
-struct sf_dir_buf {
+struct vboxsf_dir_buf {
 	size_t entries;
 	size_t free;
 	size_t used;
@@ -98,9 +98,9 @@ struct shfl_string *vboxsf_path_from_dentry(struct sf_glob_info *sf_g,
 					    struct dentry *dentry);
 int vboxsf_nlscpy(struct sf_glob_info *sf_g, char *name, size_t name_bound_len,
 		  const unsigned char *utf8_name, size_t utf8_len);
-struct sf_dir_info *vboxsf_dir_info_alloc(void);
-void vboxsf_dir_info_free(struct sf_dir_info *p);
-int vboxsf_dir_read_all(struct sf_glob_info *sf_g, struct sf_dir_info *sf_d,
+struct vboxsf_dir_info *vboxsf_dir_info_alloc(void);
+void vboxsf_dir_info_free(struct vboxsf_dir_info *p);
+int vboxsf_dir_read_all(struct sf_glob_info *sf_g, struct vboxsf_dir_info *sf_d,
 			u64 handle);
 
 /* from vboxsf_wrappers.c */
@@ -115,10 +115,8 @@ int vboxsf_remove(u32 root, struct shfl_string *parsed_path, u32 flags);
 int vboxsf_rename(u32 root, struct shfl_string *src_path,
 		  struct shfl_string *dest_path, u32 flags);
 
-int vboxsf_read(u32 root, u64 handle, u64 offset,
-		u32 *buf_len, uintptr_t buf, bool user);
-int vboxsf_write(u32 root, u64 handle, u64 offset,
-		 u32 *buf_len, uintptr_t buf, bool user);
+int vboxsf_read(u32 root, u64 handle, u64 offset, u32 *buf_len, u8 *buf);
+int vboxsf_write(u32 root, u64 handle, u64 offset, u32 *buf_len, u8 *buf);
 
 int vboxsf_dirinfo(u32 root, u64 handle,
 		   struct shfl_string *parsed_path, u32 flags, u32 index,

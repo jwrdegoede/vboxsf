@@ -236,7 +236,7 @@ fail_free:
 
 static void sf_inode_init_once(void *data)
 {
-	struct sf_inode_info *sf_i = (struct sf_inode_info *)data;
+	struct vboxsf_inode *sf_i = (struct vboxsf_inode *)data;
 
 	mutex_init(&sf_i->handle_list_mutex);
 	inode_init_once(&sf_i->vfs_inode);
@@ -244,7 +244,7 @@ static void sf_inode_init_once(void *data)
 
 static struct inode *sf_alloc_inode(struct super_block *sb)
 {
-	struct sf_inode_info *sf_i;
+	struct vboxsf_inode *sf_i;
 
 	sf_i = kmem_cache_alloc(sf_inode_cachep, GFP_NOFS);
 	if (!sf_i)
@@ -341,7 +341,7 @@ static int vboxsf_setup(void)
 		goto success;
 
 	sf_inode_cachep = kmem_cache_create("vboxsf_inode_cache",
-					     sizeof(struct sf_inode_info),
+					     sizeof(struct vboxsf_inode),
 					     0, (SLAB_RECLAIM_ACCOUNT|
 						SLAB_MEM_SPREAD|SLAB_ACCOUNT),
 					     sf_inode_init_once);

@@ -9,21 +9,11 @@
 #include <linux/vbox_utils.h>
 #include "vfsmod.h"
 
-/**
- * sf_dir_open - Open a directory
- * @inode:	inode
- * @file:	file
- *
- * Open a directory. Read the complete content into a buffer.
- *
- * Returns:
- * 0 or negative errno value.
- */
-static int sf_dir_open(struct inode *inode, struct file *file)
+static int vboxsf_dir_open(struct inode *inode, struct file *file)
 {
 	struct sf_glob_info *sf_g = GET_GLOB_INFO(inode->i_sb);
 	struct shfl_createparms params = {};
-	struct sf_dir_info *sf_d;
+	struct vboxsf_dir_info *sf_d;
 	int err;
 
 	sf_d = vboxsf_dir_info_alloc();
@@ -52,19 +42,7 @@ static int sf_dir_open(struct inode *inode, struct file *file)
 	return err;
 }
 
-/**
- * sf_dir_release - Directory file release method
- * @inode:	inode
- * @file:	file
- *
- * This is called when reference count of [file] goes to zero. Notify
- * the host that it can free whatever is associated with this directory
- * and deallocate our own internal buffers
- *
- * Returns:
- * 0 or negative errno value.
- */
-static int sf_dir_release(struct inode *inode, struct file *file)
+static int vboxsf_dir_release(struct inode *inode, struct file *file)
 {
 	if (file->private_data)
 		vboxsf_dir_info_free(file->private_data);
@@ -72,14 +50,7 @@ static int sf_dir_release(struct inode *inode, struct file *file)
 	return 0;
 }
 
-/**
- * sf_get_d_type - Translate RTFMODE into DT_xxx
- * @mode:	file mode
- *
- * Returns:
- * d_type
- */
-static unsigned int sf_get_d_type(u32 mode)
+static unsigned int vboxsf_get_d_type(u32 mode)
 {
 	unsigned int d_type;
 
@@ -115,114 +86,90 @@ static unsigned int sf_get_d_type(u32 mode)
 	return d_type;
 }
 
-/**
- * sf_getdent - Get name and type of directory-entry
- * @dir:	Directory to get element at f_pos from
- * @d_name:	Buffer in which to return element name
- * @d_type:	Buffer in which to return element file-type
- *
- * Extract element (@dir->f_pos) from the directory @dir into @d_name
- * and @d_type.
- *
- * Returns:
- * 0 on success, 1 when the end of the dir is reached, or a negative errno
- * value on error.
- */
-static int sf_getdent(struct file *dir, loff_t pos,
-		      char d_name[NAME_MAX], unsigned int *d_type)
+static bool vboxsf_dir_emit(struct file *dir, struct dir_context *ctx)
 {
 	struct sf_glob_info *sf_g = GET_GLOB_INFO(file_inode(dir)->i_sb);
-	struct sf_dir_info *sf_d = dir->private_data;
+	struct vboxsf_dir_info *sf_d = dir->private_data;
 	struct shfl_dirinfo *info;
-	struct sf_dir_buf *b;
+	struct vboxsf_dir_buf *b;
+	unsigned int d_type;
 	loff_t i, cur = 0;
+	ino_t fake_ino;
+	size_t size;
+	int err;
 
 	list_for_each_entry(b, &sf_d->info_list, head) {
-		if (pos >= cur + b->entries) {
+try_next_entry:
+		if (ctx->pos >= cur + b->entries) {
 			cur += b->entries;
 			continue;
 		}
 
 		/*
-		 * Note the sf_dir_info objects we are iterating over here
+		 * Note the vboxsf_dir_info objects we are iterating over here
 		 * are variable sized, so the info pointer may end up being
 		 * unaligned. This is how we get the data from the host.
 		 * Since vboxsf is only supported on x86 machines this is not
 		 * a problem.
 		 */
-		for (i = 0, info = b->buf; i < pos - cur; ++i) {
-			size_t size;
-
+		for (i = 0, info = b->buf; i < ctx->pos - cur; i++) {
 			size = offsetof(struct shfl_dirinfo, name.string) +
 			       info->name.size;
-			info = (struct shfl_dirinfo *)((uintptr_t) info + size);
+			info = (struct shfl_dirinfo *)((uintptr_t)info + size);
 		}
 
-		*d_type = sf_get_d_type(info->info.attr.mode);
-
-		return vboxsf_nlscpy(sf_g, d_name, NAME_MAX,
-				     info->name.string.utf8, info->name.length);
-	}
-
-	return 1;
-}
-
-/**
- * sf_dir_iterate - Iterate over directory entries
- * @dir:	Directory to read
- * @ctx:	Directory context in which to store read elements
- *
- * This is called when vfs wants to populate internal buffers with
- * the directory's contents.
- *
- * Extract elements from the directory listing (incrementing @ctx->pos
- * along the way) and emit them using dir_emit until:
- *
- * a. there are no more entries (sf_getdent returns 1)
- * b. failure to compute fake inode number
- * c. dir_emit() returns false
- *
- * Returns:
- * 0 or negative errno value.
- */
-static int sf_dir_iterate(struct file *dir, struct dir_context *ctx)
-{
-	char d_name[NAME_MAX];
-	unsigned int d_type;
-	ino_t fake_ino;
-	int err;
-
-	for (;;) {
-		err = sf_getdent(dir, ctx->pos, d_name, &d_type);
-		if (unlikely(err)) { /* EOF or an error */
-			if (err == 1)
-				return 0;
-			/* skip erroneous entry and proceed */
-			ctx->pos += 1;
-			continue;
-		}
+		/* Info now points to the right entry, emit it. */
+		d_type = vboxsf_get_d_type(info->info.attr.mode);
 
 		/*
 		 * On 32 bit systems pos is 64 signed, while ino is 32 bit
 		 * unsigned so fake_ino may overflow, check for this.
 		 */
 		if ((ino_t)(ctx->pos + 1) != (u64)(ctx->pos + 1)) {
-			vbg_err("vboxsf: can not compute ino\n");
-			return -EINVAL;
+			vbg_err("vboxsf: fake ino overflow, truncating dir\n");
+			return false;
 		}
 		fake_ino = ctx->pos + 1;
 
-		if (!dir_emit(ctx, d_name, strlen(d_name), fake_ino, d_type))
-			return 0;
+		if (sf_g->nls) {
+			char d_name[NAME_MAX];
 
-		ctx->pos += 1;
+			err = vboxsf_nlscpy(sf_g, d_name, NAME_MAX,
+					    info->name.string.utf8,
+					    info->name.length);
+			if (err) {
+				/* skip erroneous entry and proceed */
+				ctx->pos += 1;
+				goto try_next_entry;
+			}
+
+			return dir_emit(ctx, d_name, strlen(d_name),
+					fake_ino, d_type);
+		} else {
+			return dir_emit(ctx,
+					info->name.string.utf8,
+					info->name.length,
+					fake_ino, d_type);
+		}
 	}
+
+	return false;
+}
+
+static int vboxsf_dir_iterate(struct file *dir, struct dir_context *ctx)
+{
+	bool keep_iterating;
+
+	for (keep_iterating = true; keep_iterating; ctx->pos += 1)
+		keep_iterating = vboxsf_dir_emit(dir, ctx);
+
+	return 0;
 }
 
 const struct file_operations vboxsf_dir_fops = {
-	.open = sf_dir_open,
-	.iterate = sf_dir_iterate,
-	.release = sf_dir_release,
+	.open = vboxsf_dir_open,
+	.iterate = vboxsf_dir_iterate,
+	.release = vboxsf_dir_release,
 	.read = generic_read_dir,
 	.llseek = generic_file_llseek,
 };
@@ -231,7 +178,7 @@ const struct file_operations vboxsf_dir_fops = {
  * This is called during name resolution/lookup to check if the @dentry in
  * the cache is still valid. the job is handled by vboxsf_inode_revalidate.
  */
-static int sf_dentry_revalidate(struct dentry *dentry, unsigned int flags)
+static int vboxsf_dentry_revalidate(struct dentry *dentry, unsigned int flags)
 {
 	if (flags & LOOKUP_RCU)
 		return -ECHILD;
@@ -243,29 +190,14 @@ static int sf_dentry_revalidate(struct dentry *dentry, unsigned int flags)
 }
 
 const struct dentry_operations vboxsf_dentry_ops = {
-	.d_revalidate = sf_dentry_revalidate
+	.d_revalidate = vboxsf_dentry_revalidate
 };
 
 /* iops */
 
-/**
- * sf_lookup - lookup a directory entry
- * @parent:	inode of the parent directory
- * @dentry:	dentry to populate
- * @flags:	flags
- *
- * This is called when vfs failed to locate dentry in the cache. The
- * job of this function is to allocate inode and link it to dentry.
- * [dentry] contains the name to be looked in the [parent] directory.
- * Failure to locate the name is not a "hard" error, in this case NULL
- * inode is added to [dentry] and vfs should proceed trying to create
- * the entry via other means.
- *
- * Returns:
- * NULL on success, ERR_PTR on failure.
- */
-static struct dentry *sf_lookup(struct inode *parent, struct dentry *dentry,
-				unsigned int flags)
+static struct dentry *vboxsf_dir_lookup(struct inode *parent,
+					struct dentry *dentry,
+					unsigned int flags)
 {
 	struct sf_glob_info *sf_g = GET_GLOB_INFO(parent->i_sb);
 	struct shfl_fsobjinfo fsinfo;
@@ -286,22 +218,11 @@ static struct dentry *sf_lookup(struct inode *parent, struct dentry *dentry,
 	return d_splice_alias(inode, dentry);
 }
 
-/**
- * sf_instantiate - Instantiate inode for dentry
- * @parent:	inode of the parent directory
- * @dentry:	directory entry
- * @info:	file information
- *
- * Create a new inode, initialize it with info from @info and instantiate.
- *
- * Returns:
- * 0 or negative errno value.
- */
-static int sf_instantiate(struct inode *parent, struct dentry *dentry,
-			  struct shfl_fsobjinfo *info)
+static int vboxsf_dir_instantiate(struct inode *parent, struct dentry *dentry,
+				  struct shfl_fsobjinfo *info)
 {
 	struct sf_glob_info *sf_g = GET_GLOB_INFO(parent->i_sb);
-	struct sf_inode_info *sf_i;
+	struct vboxsf_inode *sf_i;
 	struct inode *inode;
 
 	inode = vboxsf_new_inode(parent->i_sb);
@@ -318,20 +239,10 @@ static int sf_instantiate(struct inode *parent, struct dentry *dentry,
 	return 0;
 }
 
-/**
- * sf_create_aux - Create a new regular file / directory
- * @parent:	inode of the parent directory
- * @dentry:	directory entry
- * @mode:	file mode
- * @is_dir:	true if directory, false otherwise
- *
- * Returns:
- * 0 or negative errno value.
- */
-static int sf_create_aux(struct inode *parent, struct dentry *dentry,
-			 umode_t mode, int is_dir)
+static int vboxsf_dir_create(struct inode *parent, struct dentry *dentry,
+			     umode_t mode, int is_dir)
 {
-	struct sf_inode_info *sf_parent_i = GET_INODE_INFO(parent);
+	struct vboxsf_inode *sf_parent_i = GET_INODE_INFO(parent);
 	struct sf_glob_info *sf_g = GET_GLOB_INFO(parent->i_sb);
 	struct shfl_createparms params = {};
 	int err;
@@ -354,7 +265,7 @@ static int sf_create_aux(struct inode *parent, struct dentry *dentry,
 
 	vboxsf_close(sf_g->root, params.handle);
 
-	err = sf_instantiate(parent, dentry, &params.info);
+	err = vboxsf_dir_instantiate(parent, dentry, &params.info);
 	if (err)
 		return err;
 
@@ -364,58 +275,33 @@ static int sf_create_aux(struct inode *parent, struct dentry *dentry,
 	return 0;
 }
 
-/**
- * sf_create - Create a new regular file
- * @parent:	inode of the parent directory
- * @dentry:	directory entry
- * @mode:	file mode
- * @excl:	Possible O_EXCL...
- *
- * Returns:
- * 0 or negative errno value.
- */
-static int sf_create(struct inode *parent, struct dentry *dentry, umode_t mode,
-		     bool excl)
+static int vboxsf_dir_mkfile(struct inode *parent, struct dentry *dentry,
+			     umode_t mode, bool excl)
 {
-	return sf_create_aux(parent, dentry, mode, 0);
+	return vboxsf_dir_create(parent, dentry, mode, 0);
 }
 
-/**
- * sf_mkdir - Create a new regular directory
- * @parent:	inode of the parent directory
- * @dentry:	directory entry
- * @mode:	file mode
- * @excl:	Possible O_EXCL...
- *
- * Returns:
- * 0 or negative errno value.
- */
-static int sf_mkdir(struct inode *parent, struct dentry *dentry, umode_t mode)
+static int vboxsf_dir_mkdir(struct inode *parent, struct dentry *dentry,
+			    umode_t mode)
 {
-	return sf_create_aux(parent, dentry, mode, 1);
+	return vboxsf_dir_create(parent, dentry, mode, 1);
 }
 
-/**
- * sf_unlink_aux - Remove a regular file / directory.
- * @parent:	inode of the parent directory
- * @dentry:	directory entry
- * @is_dir:	true if directory, false otherwise
- *
- * Returns:
- * 0 or negative errno value.
- */
-static int sf_unlink_aux(struct inode *parent, struct dentry *dentry,
-			 int is_dir)
+static int vboxsf_dir_unlink(struct inode *parent, struct dentry *dentry)
 {
 	struct sf_glob_info *sf_g = GET_GLOB_INFO(parent->i_sb);
-	struct sf_inode_info *sf_parent_i = GET_INODE_INFO(parent);
+	struct vboxsf_inode *sf_parent_i = GET_INODE_INFO(parent);
 	struct inode *inode = d_inode(dentry);
 	struct shfl_string *path;
 	uint32_t flags;
 	int err;
 
-	flags = is_dir ? SHFL_REMOVE_DIR : SHFL_REMOVE_FILE;
-	if ((inode->i_mode & S_IFLNK) == S_IFLNK)
+	if (S_ISDIR(inode->i_mode))
+		flags = SHFL_REMOVE_DIR;
+	else
+		flags = SHFL_REMOVE_FILE;
+
+	if (S_ISLNK(inode->i_mode))
 		flags |= SHFL_REMOVE_SYMLINK;
 
 	path = vboxsf_path_from_dentry(sf_g, dentry);
@@ -433,50 +319,15 @@ static int sf_unlink_aux(struct inode *parent, struct dentry *dentry,
 	return 0;
 }
 
-/**
- * sf_unlink_aux - Remove a regular file
- * @parent:	inode of the parent directory
- * @dentry:	directory entry
- *
- * Returns:
- * 0 or negative errno value.
- */
-static int sf_unlink(struct inode *parent, struct dentry *dentry)
-{
-	return sf_unlink_aux(parent, dentry, 0);
-}
-
-/**
- * sf_rmdir - Remove a directory
- * @parent:	inode of the parent directory
- * @dentry:	directory entry
- *
- * Returns:
- * 0 or negative errno value.
- */
-static int sf_rmdir(struct inode *parent, struct dentry *dentry)
-{
-	return sf_unlink_aux(parent, dentry, 1);
-}
-
-/**
- * sf_rename - Rename a regular file or directory
- * @old_parent:  inode of the old parent directory
- * @old_dentry:  old directory entry
- * @new_parent:  inode of the new parent directory
- * @new_dentry:  new directory entry
- * @flags:       flags
- *
- * Returns:
- * 0 or negative errno value.
- */
-static int sf_rename(struct inode *old_parent, struct dentry *old_dentry,
-		     struct inode *new_parent, struct dentry *new_dentry,
-		     unsigned int flags)
+static int vboxsf_dir_rename(struct inode *old_parent,
+			     struct dentry *old_dentry,
+			     struct inode *new_parent,
+			     struct dentry *new_dentry,
+			     unsigned int flags)
 {
 	struct sf_glob_info *sf_g = GET_GLOB_INFO(old_parent->i_sb);
-	struct sf_inode_info *sf_old_parent_i = GET_INODE_INFO(old_parent);
-	struct sf_inode_info *sf_new_parent_i = GET_INODE_INFO(new_parent);
+	struct vboxsf_inode *sf_old_parent_i = GET_INODE_INFO(old_parent);
+	struct vboxsf_inode *sf_new_parent_i = GET_INODE_INFO(new_parent);
 	u32 shfl_flags = SHFL_RENAME_FILE | SHFL_RENAME_REPLACE_IF_EXISTS;
 	struct shfl_string *old_path, *new_path;
 	int err;
@@ -509,10 +360,10 @@ static int sf_rename(struct inode *old_parent, struct dentry *old_dentry,
 	return err;
 }
 
-static int sf_symlink(struct inode *parent, struct dentry *dentry,
-		      const char *symname)
+static int vboxsf_dir_symlink(struct inode *parent, struct dentry *dentry,
+			      const char *symname)
 {
-	struct sf_inode_info *sf_parent_i = GET_INODE_INFO(parent);
+	struct vboxsf_inode *sf_parent_i = GET_INODE_INFO(parent);
 	struct sf_glob_info *sf_g = GET_GLOB_INFO(parent->i_sb);
 	int symname_size = strlen(symname) + 1;
 	struct shfl_string *path, *ssymname;
@@ -540,7 +391,7 @@ static int sf_symlink(struct inode *parent, struct dentry *dentry,
 		return (err == -EROFS) ? -EPERM : err;
 	}
 
-	err = sf_instantiate(parent, dentry, &info);
+	err = vboxsf_dir_instantiate(parent, dentry, &info);
 	if (err)
 		return err;
 
@@ -550,13 +401,13 @@ static int sf_symlink(struct inode *parent, struct dentry *dentry,
 }
 
 const struct inode_operations vboxsf_dir_iops = {
-	.lookup = sf_lookup,
-	.create = sf_create,
-	.mkdir = sf_mkdir,
-	.rmdir = sf_rmdir,
-	.unlink = sf_unlink,
-	.rename = sf_rename,
+	.lookup  = vboxsf_dir_lookup,
+	.create  = vboxsf_dir_mkfile,
+	.mkdir   = vboxsf_dir_mkdir,
+	.rmdir   = vboxsf_dir_unlink,
+	.unlink  = vboxsf_dir_unlink,
+	.rename  = vboxsf_dir_rename,
+	.symlink = vboxsf_dir_symlink,
 	.getattr = vboxsf_getattr,
 	.setattr = vboxsf_setattr,
-	.symlink = sf_symlink
 };

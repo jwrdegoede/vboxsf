@@ -174,7 +174,7 @@ int vboxsf_stat_dentry(struct dentry *dentry, struct shfl_fsobjinfo *info)
 int vboxsf_inode_revalidate(struct dentry *dentry)
 {
 	struct sf_glob_info *sf_g = GET_GLOB_INFO(dentry->d_sb);
-	struct sf_inode_info *sf_i;
+	struct vboxsf_inode *sf_i;
 	struct shfl_fsobjinfo info;
 	struct timespec64 prev_mtime;
 	struct inode *inode;
@@ -216,7 +216,7 @@ int vboxsf_getattr(const struct path *path, struct kstat *kstat,
 	int err;
 	struct dentry *dentry = path->dentry;
 	struct inode *inode = d_inode(dentry);
-	struct sf_inode_info *sf_i = GET_INODE_INFO(inode);
+	struct vboxsf_inode *sf_i = GET_INODE_INFO(inode);
 
 	switch (flags & AT_STATX_SYNC_TYPE) {
 	case AT_STATX_DONT_SYNC:
@@ -237,7 +237,7 @@ int vboxsf_getattr(const struct path *path, struct kstat *kstat,
 
 int vboxsf_setattr(struct dentry *dentry, struct iattr *iattr)
 {
-	struct sf_inode_info *sf_i = GET_INODE_INFO(d_inode(dentry));
+	struct vboxsf_inode *sf_i = GET_INODE_INFO(d_inode(dentry));
 	struct sf_glob_info *sf_g = GET_GLOB_INFO(dentry->d_sb);
 	struct shfl_createparms params = {};
 	struct shfl_fsobjinfo info = {};
@@ -460,9 +460,9 @@ int vboxsf_nlscpy(struct sf_glob_info *sf_g, char *name, size_t name_bound_len,
 	return 0;
 }
 
-static struct sf_dir_buf *sf_dir_buf_alloc(struct list_head *list)
+static struct vboxsf_dir_buf *vboxsf_dir_buf_alloc(struct list_head *list)
 {
-	struct sf_dir_buf *b;
+	struct vboxsf_dir_buf *b;
 
 	b = kmalloc(sizeof(*b), GFP_KERNEL);
 	if (!b)
@@ -482,22 +482,16 @@ static struct sf_dir_buf *sf_dir_buf_alloc(struct list_head *list)
 	return b;
 }
 
-static void sf_dir_buf_free(struct sf_dir_buf *b)
+static void vboxsf_dir_buf_free(struct vboxsf_dir_buf *b)
 {
 	list_del(&b->head);
 	kfree(b->buf);
 	kfree(b);
 }
 
-/**
- * vboxsf_dir_info_alloc - Create a new directory buffer descriptor
- *
- * Returns:
- * Created sf_dir_info buffer, or NULL when malloc fails
- */
-struct sf_dir_info *vboxsf_dir_info_alloc(void)
+struct vboxsf_dir_info *vboxsf_dir_info_alloc(void)
 {
-	struct sf_dir_info *p;
+	struct vboxsf_dir_info *p;
 
 	p = kmalloc(sizeof(*p), GFP_KERNEL);
 	if (!p)
@@ -507,35 +501,31 @@ struct sf_dir_info *vboxsf_dir_info_alloc(void)
 	return p;
 }
 
-/**
- * vboxsf_dir_info_free - Free the directory buffer
- * @p:		sf_dir_info buffer to free
- */
-void vboxsf_dir_info_free(struct sf_dir_info *p)
+void vboxsf_dir_info_free(struct vboxsf_dir_info *p)
 {
 	struct list_head *list, *pos, *tmp;
 
 	list = &p->info_list;
 	list_for_each_safe(pos, tmp, list) {
-		struct sf_dir_buf *b;
+		struct vboxsf_dir_buf *b;
 
-		b = list_entry(pos, struct sf_dir_buf, head);
-		sf_dir_buf_free(b);
+		b = list_entry(pos, struct vboxsf_dir_buf, head);
+		vboxsf_dir_buf_free(b);
 	}
 	kfree(p);
 }
 
-int vboxsf_dir_read_all(struct sf_glob_info *sf_g, struct sf_dir_info *sf_d,
+int vboxsf_dir_read_all(struct sf_glob_info *sf_g, struct vboxsf_dir_info *sf_d,
 			u64 handle)
 {
-	struct sf_dir_buf *b;
+	struct vboxsf_dir_buf *b;
 	u32 entries, size;
 	int err = 0;
 	void *buf;
 
 	/* vboxsf_dirinfo returns 1 on end of dir */
 	while (err == 0) {
-		b = sf_dir_buf_alloc(&sf_d->info_list);
+		b = vboxsf_dir_buf_alloc(&sf_d->info_list);
 		if (!b) {
 			err = -ENOMEM;
 			break;
@@ -555,7 +545,7 @@ int vboxsf_dir_read_all(struct sf_glob_info *sf_g, struct sf_dir_info *sf_d,
 	}
 
 	if (b && b->used == 0)
-		sf_dir_buf_free(b);
+		vboxsf_dir_buf_free(b);
 
 	/* -EILSEQ means the host could not translate a filename, ignore */
 	if (err > 0 || err == -EILSEQ)

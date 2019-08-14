@@ -12,7 +12,7 @@
 #include <linux/sizes.h>
 #include "vfsmod.h"
 
-struct sf_handle {
+struct vboxsf_handle {
 	u64 handle;
 	u32 root;
 	u32 access_flags;
@@ -20,105 +20,11 @@ struct sf_handle {
 	struct list_head head;
 };
 
-/**
- * Read from a regular file.
- * Return: The number of bytes read on success, negative errno value otherwise
- * @file	the file
- * @buf		the buffer
- * @size	length of the buffer
- * @off		offset within the file
- */
-static ssize_t sf_reg_read(struct file *file, char __user *buf, size_t size,
-			   loff_t *off)
+static int vboxsf_file_open(struct inode *inode, struct file *file)
 {
-	struct sf_handle *sf_handle = file->private_data;
-	u64 pos = *off;
-	u32 nread;
-	int err;
-
-	if (!size)
-		return 0;
-
-	if (size > SHFL_MAX_RW_COUNT)
-		nread = SHFL_MAX_RW_COUNT;
-	else
-		nread = size;
-
-	err = vboxsf_read(sf_handle->root, sf_handle->handle, pos, &nread,
-			  (uintptr_t)buf, true);
-	if (err)
-		return err;
-
-	*off += nread;
-	return nread;
-}
-
-/**
- * Write to a regular file.
- * Return: The number of bytes written on success, negative errno val otherwise
- * @file	the file
- * @buf		the buffer
- * @size	length of the buffer
- * @off		offset within the file
- */
-static ssize_t sf_reg_write(struct file *file, const char __user *buf,
-			    size_t size, loff_t *off)
-{
-	struct inode *inode = file_inode(file);
-	struct sf_inode_info *sf_i = GET_INODE_INFO(inode);
-	struct sf_handle *sf_handle = file->private_data;
-	u32 nwritten;
-	u64 pos;
-	int err;
-
-	if (file->f_flags & O_APPEND)
-		pos = i_size_read(inode);
-	else
-		pos = *off;
-
-	if (!size)
-		return 0;
-
-	if (size > SHFL_MAX_RW_COUNT)
-		nwritten = SHFL_MAX_RW_COUNT;
-	else
-		nwritten = size;
-
-	/* Make sure any pending writes done through mmap are flushed */
-	err = filemap_fdatawait_range(inode->i_mapping, pos, pos + nwritten);
-	if (err)
-		return err;
-
-	err = vboxsf_write(sf_handle->root, sf_handle->handle, pos, &nwritten,
-			   (uintptr_t)buf, true);
-	if (err)
-		return err;
-
-	if (pos + nwritten > i_size_read(inode))
-		i_size_write(inode, pos + nwritten);
-
-	/* Invalidate page-cache so that mmap using apps see the changes too */
-	invalidate_mapping_pages(inode->i_mapping, pos >> PAGE_SHIFT,
-				 (pos + nwritten) >> PAGE_SHIFT);
-
-	/* mtime changed */
-	sf_i->force_restat = 1;
-
-	*off = pos + nwritten;
-	return nwritten;
-}
-
-/**
- * Open a regular file.
- * Return: 0 or negative errno value.
- * @inode	inode
- * @file	file
- */
-static int sf_reg_open(struct inode *inode, struct file *file)
-{
-	struct sf_inode_info *sf_i = GET_INODE_INFO(inode);
+	struct vboxsf_inode *sf_i = GET_INODE_INFO(inode);
 	struct shfl_createparms params = {};
-	struct sf_handle *sf_handle;
+	struct vboxsf_handle *sf_handle;
 	u32 access_flags = 0;
 	int err;
 
@@ -199,25 +105,19 @@ static int sf_reg_open(struct inode *inode, struct file *file)
 	return 0;
 }
 
-static void sf_handle_release(struct kref *refcount)
+static void vboxsf_handle_release(struct kref *refcount)
 {
-	struct sf_handle *sf_handle = container_of(refcount, struct sf_handle,
-						   refcount);
+	struct vboxsf_handle *sf_handle =
+		container_of(refcount, struct vboxsf_handle, refcount);
 
 	vboxsf_close(sf_handle->root, sf_handle->handle);
 	kfree(sf_handle);
 }
 
-/**
- * Close a regular file.
- * Return: 0 or negative errno value.
- * @inode	inode
- * @file	file
- */
-static int sf_reg_release(struct inode *inode, struct file *file)
+static int vboxsf_file_release(struct inode *inode, struct file *file)
 {
-	struct sf_inode_info *sf_i = GET_INODE_INFO(inode);
-	struct sf_handle *sf_handle = file->private_data;
+	struct vboxsf_inode *sf_i = GET_INODE_INFO(inode);
+	struct vboxsf_handle *sf_handle = file->private_data;
 
 	filemap_write_and_wait(inode->i_mapping);
 
@@ -225,7 +125,7 @@ static int sf_reg_release(struct inode *inode, struct file *file)
 	list_del(&sf_handle->head);
 	mutex_unlock(&sf_i->handle_list_mutex);
 
-	kref_put(&sf_handle->refcount, sf_handle_release);
+	kref_put(&sf_handle->refcount, vboxsf_handle_release);
 	file->private_data = NULL;
 	return 0;
 }
@@ -234,54 +134,61 @@ static int sf_reg_release(struct inode *inode, struct file *file)
  * Write back dirty pages now, because there may not be any suitable
  * open files later
  */
-static void sf_vma_close(struct vm_area_struct *vma)
+static void vboxsf_vma_close(struct vm_area_struct *vma)
 {
 	filemap_write_and_wait(vma->vm_file->f_mapping);
 }
 
-static vm_fault_t sf_page_mkwrite(struct vm_fault *vmf)
-{
-	struct page *page = vmf->page;
-	struct inode *inode = file_inode(vmf->vma->vm_file);
-
-	lock_page(page);
-	if (page->mapping != inode->i_mapping) {
-		unlock_page(page);
-		return VM_FAULT_NOPAGE;
-	}
-
-	return VM_FAULT_LOCKED;
-}
-
-static const struct vm_operations_struct sf_file_vm_ops = {
-	.close		= sf_vma_close,
+static const struct vm_operations_struct vboxsf_file_vm_ops = {
+	.close		= vboxsf_vma_close,
 	.fault		= filemap_fault,
 	.map_pages	= filemap_map_pages,
-	.page_mkwrite	= sf_page_mkwrite,
 };
 
-static int sf_reg_mmap(struct file *file, struct vm_area_struct *vma)
+static int vboxsf_file_mmap(struct file *file, struct vm_area_struct *vma)
 {
 	int err;
 
 	err = generic_file_mmap(file, vma);
 	if (!err)
-		vma->vm_ops = &sf_file_vm_ops;
+		vma->vm_ops = &vboxsf_file_vm_ops;
 
 	return err;
 }
 
+/*
+ * Note that since we are accessing files on the host's filesystem, files
+ * may always be changed underneath us by the host!
+ *
+ * To avoid returning stale data when a file gets *opened* on our (the guest)
+ * side, we do a "stat" on the host side, then compare the mtime with the
+ * last known mtime and invalidate the page-cache if they differ.
+ * This is done from vboxsf_inode_revalidate().
+ *
+ * Ideally we would wrap generic_file_read_iter with a function which also
+ * does this check, to reduce the chance of us missing writes happening on the
+ * host side after open(). But the vboxsf stat call to the host only works on
+ * filenames, so that would require caching the filename in our
+ * file->private_data and there is no guarantee that filename will still
+ * be valid at read_iter time. So this would be in no way bulletproof.
+ *
+ * Also such a check will not help with returning stale data from reads done
+ * through mmap accesses.
+ *
+ * So we are keeping things KISS and directly using generic_file_read_iter
+ * without a wrapper, thus providing the same staleness guarantees for
+ * read() and mmap() accesses: Only data written on the host side before
+ * open() on the guest side is guaranteed to be seen by the guest.
+ */
 const struct file_operations vboxsf_reg_fops = {
-	.read = sf_reg_read,
-	.open = sf_reg_open,
-	.write = sf_reg_write,
-	.release = sf_reg_release,
-	.mmap = sf_reg_mmap,
-	.splice_read = generic_file_splice_read,
+	.llseek = generic_file_llseek,
 	.read_iter = generic_file_read_iter,
 	.write_iter = generic_file_write_iter,
+	.mmap = vboxsf_file_mmap,
+	.open = vboxsf_file_open,
+	.release = vboxsf_file_release,
 	.fsync = noop_fsync,
-	.llseek = generic_file_llseek,
+	.splice_read = generic_file_splice_read,
 };
 
 const struct inode_operations vboxsf_reg_iops = {
@@ -289,9 +196,9 @@ const struct inode_operations vboxsf_reg_iops = {
 	.setattr = vboxsf_setattr
 };
 
-static int sf_readpage(struct file *file, struct page *page)
+static int vboxsf_readpage(struct file *file, struct page *page)
 {
-	struct sf_handle *sf_handle = file->private_data;
+	struct vboxsf_handle *sf_handle = file->private_data;
 	loff_t off = page_offset(page);
 	u32 nread = PAGE_SIZE;
 	u8 *buf;
@@ -299,8 +206,7 @@ static int sf_readpage(struct file *file, struct page *page)
 
 	buf = kmap(page);
 
-	err = vboxsf_read(sf_handle->root, sf_handle->handle, off, &nread,
-			  (uintptr_t)buf, false);
+	err = vboxsf_read(sf_handle->root, sf_handle->handle, off, &nread, buf);
 	if (err == 0) {
 		memset(&buf[nread], 0, PAGE_SIZE - nread);
 		flush_dcache_page(page);
@@ -314,9 +220,9 @@ static int sf_readpage(struct file *file, struct page *page)
 	return err;
 }
 
-static struct sf_handle *sf_get_writeable_handle(struct sf_inode_info *sf_i)
+static struct vboxsf_handle *vboxsf_get_write_handle(struct vboxsf_inode *sf_i)
 {
-	struct sf_handle *h, *sf_handle = NULL;
+	struct vboxsf_handle *h, *sf_handle = NULL;
 
 	mutex_lock(&sf_i->handle_list_mutex);
 	list_for_each_entry(h, &sf_i->handle_list, head) {
@@ -332,11 +238,11 @@ static struct sf_handle *sf_get_writeable_handle(struct sf_inode_info *sf_i)
 	return sf_handle;
 }
 
-static int sf_writepage(struct page *page, struct writeback_control *wbc)
+static int vboxsf_writepage(struct page *page, struct writeback_control *wbc)
 {
 	struct inode *inode = page->mapping->host;
-	struct sf_inode_info *sf_i = GET_INODE_INFO(inode);
-	struct sf_handle *sf_handle;
+	struct vboxsf_inode *sf_i = GET_INODE_INFO(inode);
+	struct vboxsf_handle *sf_handle;
 	loff_t off = page_offset(page);
 	loff_t size = i_size_read(inode);
 	u32 nwrite = PAGE_SIZE;
@@ -346,16 +252,16 @@ static int sf_writepage(struct page *page, struct writeback_control *wbc)
 	if (off + PAGE_SIZE > size)
 		nwrite = size & ~PAGE_MASK;
 
-	sf_handle = sf_get_writeable_handle(sf_i);
+	sf_handle = vboxsf_get_write_handle(sf_i);
 	if (!sf_handle)
 		return -EBADF;
 
 	buf = kmap(page);
-	err = vboxsf_write(sf_handle->root, sf_handle->handle, off, &nwrite,
-			   (uintptr_t)buf, false);
+	err = vboxsf_write(sf_handle->root, sf_handle->handle,
+			   off, &nwrite, buf);
 	kunmap(page);
 
-	kref_put(&sf_handle->refcount, sf_handle_release);
+	kref_put(&sf_handle->refcount, vboxsf_handle_release);
 
 	if (err == 0) {
 		ClearPageError(page);
@@ -369,20 +275,20 @@ static int sf_writepage(struct page *page, struct writeback_control *wbc)
 	return err;
 }
 
-static int sf_write_end(struct file *file, struct address_space *mapping,
-			loff_t pos, unsigned int len, unsigned int copied,
-			struct page *page, void *fsdata)
+static int vboxsf_write_end(struct file *file, struct address_space *mapping,
+			    loff_t pos, unsigned int len, unsigned int copied,
+			    struct page *page, void *fsdata)
 {
 	struct inode *inode = mapping->host;
-	struct sf_handle *sf_handle = file->private_data;
+	struct vboxsf_handle *sf_handle = file->private_data;
 	unsigned int from = pos & ~PAGE_MASK;
 	u32 nwritten = len;
 	u8 *buf;
 	int err;
 
 	buf = kmap(page);
-	err = vboxsf_write(sf_handle->root, sf_handle->handle, pos, &nwritten,
-			   (uintptr_t)buf + from, false);
+	err = vboxsf_write(sf_handle->root, sf_handle->handle,
+			   pos, &nwritten, buf + from);
 	kunmap(page);
 
 	if (err) {
@@ -408,15 +314,15 @@ out:
 }
 
 const struct address_space_operations vboxsf_reg_aops = {
-	.readpage = sf_readpage,
-	.writepage = sf_writepage,
+	.readpage = vboxsf_readpage,
+	.writepage = vboxsf_writepage,
 	.set_page_dirty = __set_page_dirty_nobuffers,
 	.write_begin = simple_write_begin,
-	.write_end = sf_write_end,
+	.write_end = vboxsf_write_end,
 };
 
-static const char *sf_get_link(struct dentry *dentry, struct inode *inode,
-			       struct delayed_call *done)
+static const char *vboxsf_get_link(struct dentry *dentry, struct inode *inode,
+				   struct delayed_call *done)
 {
 	struct sf_glob_info *sf_g = GET_GLOB_INFO(inode->i_sb);
 	struct shfl_string *path;
@@ -448,5 +354,5 @@ static const char *sf_get_link(struct dentry *dentry, struct inode *inode,
 }
 
 const struct inode_operations vboxsf_lnk_iops = {
-	.get_link = sf_get_link
+	.get_link = vboxsf_get_link
 };

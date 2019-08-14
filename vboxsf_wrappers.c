@@ -198,8 +198,7 @@ int vboxsf_rename(u32 root, struct shfl_string *src_path,
 	return vboxsf_call(SHFL_FN_RENAME, &parms, SHFL_CPARMS_RENAME, NULL);
 }
 
-int vboxsf_read(u32 root, u64 handle, u64 offset,
-		u32 *buf_len, uintptr_t buf, bool user)
+int vboxsf_read(u32 root, u64 handle, u64 offset, u32 *buf_len, u8 *buf)
 {
 	struct shfl_read parms;
 	int err;
@@ -213,12 +212,9 @@ int vboxsf_read(u32 root, u64 handle, u64 offset,
 	parms.offset.u.value64 = offset;
 	parms.cb.type = VMMDEV_HGCM_PARM_TYPE_32BIT;
 	parms.cb.u.value32 = *buf_len;
-	if (user)
-		parms.buffer.type = VMMDEV_HGCM_PARM_TYPE_LINADDR_OUT;
-	else
-		parms.buffer.type = VMMDEV_HGCM_PARM_TYPE_LINADDR_KERNEL_OUT;
+	parms.buffer.type = VMMDEV_HGCM_PARM_TYPE_LINADDR_KERNEL_OUT;
 	parms.buffer.u.pointer.size = *buf_len;
-	parms.buffer.u.pointer.u.linear_addr = buf;
+	parms.buffer.u.pointer.u.linear_addr = (uintptr_t)buf;
 
 	err = vboxsf_call(SHFL_FN_READ, &parms, SHFL_CPARMS_READ, NULL);
 
@@ -226,8 +222,7 @@ int vboxsf_read(u32 root, u64 handle, u64 offset,
 	return err;
 }
 
-int vboxsf_write(u32 root, u64 handle, u64 offset,
-		 u32 *buf_len, uintptr_t buf, bool user)
+int vboxsf_write(u32 root, u64 handle, u64 offset, u32 *buf_len, u8 *buf)
 {
 	struct shfl_write parms;
 	int err;
@@ -241,12 +236,9 @@ int vboxsf_write(u32 root, u64 handle, u64 offset,
 	parms.offset.u.value64 = offset;
 	parms.cb.type = VMMDEV_HGCM_PARM_TYPE_32BIT;
 	parms.cb.u.value32 = *buf_len;
-	if (user)
-		parms.buffer.type = VMMDEV_HGCM_PARM_TYPE_LINADDR_IN;
-	else
-		parms.buffer.type = VMMDEV_HGCM_PARM_TYPE_LINADDR_KERNEL_IN;
+	parms.buffer.type = VMMDEV_HGCM_PARM_TYPE_LINADDR_KERNEL_IN;
 	parms.buffer.u.pointer.size = *buf_len;
-	parms.buffer.u.pointer.u.linear_addr = buf;
+	parms.buffer.u.pointer.u.linear_addr = (uintptr_t)buf;
 
 	err = vboxsf_call(SHFL_FN_WRITE, &parms, SHFL_CPARMS_WRITE, NULL);
 
