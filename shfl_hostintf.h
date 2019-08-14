@@ -24,52 +24,34 @@
  * request. A handle must be closed with SHFL_FN_CLOSE.
  */
 
-/* Query mappings changes. */
-#define SHFL_FN_QUERY_MAPPINGS      (1)
-/* Query mappings changes. */
-#define SHFL_FN_QUERY_MAP_NAME      (2)
-/* Open/create object. */
-#define SHFL_FN_CREATE              (3)
-/* Close object handle. */
-#define SHFL_FN_CLOSE               (4)
-/* Read object content. */
-#define SHFL_FN_READ                (5)
-/* Write new object content. */
-#define SHFL_FN_WRITE               (6)
-/* Lock/unlock a range in the object. */
-#define SHFL_FN_LOCK                (7)
-/* List object content. */
-#define SHFL_FN_LIST                (8)
-/* Query/set object information. */
-#define SHFL_FN_INFORMATION         (9)
-/* Remove object */
-#define SHFL_FN_REMOVE              (11)
-/* Map folder (legacy) */
-#define SHFL_FN_MAP_FOLDER_OLD      (12)
-/* Unmap folder */
-#define SHFL_FN_UNMAP_FOLDER        (13)
-/* Rename object (possibly moving it to another directory) */
-#define SHFL_FN_RENAME              (14)
-/* Flush file */
-#define SHFL_FN_FLUSH               (15)
-#define SHFL_FN_SET_UTF8            (16)
-#define SHFL_CPARMS_SET_UTF8        0
-/* Map folder */
-#define SHFL_FN_MAP_FOLDER          (17)
-/* Read symlink destination (as of VBox 4.0) */
-#define SHFL_FN_READLINK            (18)
-/* Create symlink (as of VBox 4.0) */
-#define SHFL_FN_SYMLINK             (19)
-/* Ask host to show symlinks (as of VBox 4.0) */
-#define SHFL_FN_SET_SYMLINKS        (20)
-#define SHFL_CPARMS_SET_SYMLINKS    0
+enum {
+	SHFL_FN_QUERY_MAPPINGS = 1,	/* Query mappings changes. */
+	SHFL_FN_QUERY_MAP_NAME = 2,	/* Query map name. */
+	SHFL_FN_CREATE = 3,		/* Open/create object. */
+	SHFL_FN_CLOSE = 4,		/* Close object handle. */
+	SHFL_FN_READ = 5,		/* Read object content. */
+	SHFL_FN_WRITE = 6,		/* Write new object content. */
+	SHFL_FN_LOCK = 7,		/* Lock/unlock a range in the object. */
+	SHFL_FN_LIST = 8,		/* List object content. */
+	SHFL_FN_INFORMATION = 9,	/* Query/set object information. */
+	/* Note function number 10 is not used! */
+	SHFL_FN_REMOVE = 11,		/* Remove object */
+	SHFL_FN_MAP_FOLDER_OLD = 12,	/* Map folder (legacy) */
+	SHFL_FN_UNMAP_FOLDER = 13,	/* Unmap folder */
+	SHFL_FN_RENAME = 14,		/* Rename object */
+	SHFL_FN_FLUSH = 15,		/* Flush file */
+	SHFL_FN_SET_UTF8 = 16,		/* Select UTF8 filename encoding */
+	SHFL_FN_MAP_FOLDER = 17,	/* Map folder */
+	SHFL_FN_READLINK = 18,		/* Read symlink dest (as of VBox 4.0) */
+	SHFL_FN_SYMLINK = 19,		/* Create symlink (as of VBox 4.0) */
+	SHFL_FN_SET_SYMLINKS = 20,	/* Ask host to show symlinks (as of 4.0) */
+};
 
 /* Root handles for a mapping are of type u32, Root handles are unique. */
-#define SHFL_ROOT_NIL ((u32)~0)
+#define SHFL_ROOT_NIL		UINT_MAX
 
 /* Shared folders handle for an opened object are of type u64. */
-#define SHFL_HANDLE_NIL  ((u64)~0LL)
-#define SHFL_HANDLE_ROOT ((u64)0LL)
+#define SHFL_HANDLE_NIL		ULLONG_MAX
 
 /* Hardcoded maximum length (in chars) of a shared folder name. */
 #define SHFL_MAX_LEN         (256)

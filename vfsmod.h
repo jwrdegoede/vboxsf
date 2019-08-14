@@ -20,24 +20,32 @@
 #define SET_GLOB_INFO(sb, sf_g) ((sb)->s_fs_info = (sf_g))
 #define GET_INODE_INFO(i)       container_of(i, struct sf_inode_info, vfs_inode)
 
+struct vboxsf_options {
+	unsigned long ttl;
+	kuid_t uid;
+	kgid_t gid;
+	bool dmode_set;
+	bool fmode_set;
+	umode_t dmode;
+	umode_t fmode;
+	umode_t dmask;
+	umode_t fmask;
+};
+
+struct vboxsf_fs_context {
+	struct vboxsf_options o;
+	char *nls_name;
+};
+
 /* per-shared folder information */
 struct sf_glob_info {
+	struct vboxsf_options o;
 	struct shfl_fsobjinfo root_info;
 	struct idr ino_idr;
 	spinlock_t ino_idr_lock;
+	struct nls_table *nls;
 	u32 next_generation;
 	u32 root;
-	struct nls_table *nls;
-	/* mount options */
-	struct shfl_string *name;
-	char *nls_name;
-	int ttl;
-	int uid;
-	int gid;
-	int dmode;
-	int fmode;
-	int dmask;
-	int fmask;
 	int bdi_id;
 };
 

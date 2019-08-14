@@ -74,8 +74,8 @@ void vboxsf_init_inode(struct sf_glob_info *sf_g, struct inode *inode,
 	inode->i_mapping->a_ops = &vboxsf_reg_aops;
 
 	if (SHFL_IS_DIRECTORY(attr->mode)) {
-		inode->i_mode = sf_g->dmode != ~0 ? (sf_g->dmode & 0777) : mode;
-		inode->i_mode &= ~sf_g->dmask;
+		inode->i_mode = sf_g->o.dmode_set ? sf_g->o.dmode : mode;
+		inode->i_mode &= ~sf_g->o.dmask;
 		inode->i_mode |= S_IFDIR;
 		inode->i_op = &vboxsf_dir_iops;
 		inode->i_fop = &vboxsf_dir_fops;
@@ -85,22 +85,22 @@ void vboxsf_init_inode(struct sf_glob_info *sf_g, struct inode *inode,
 		 */
 		set_nlink(inode, 1);
 	} else if (SHFL_IS_SYMLINK(attr->mode)) {
-		inode->i_mode = sf_g->fmode != ~0 ? (sf_g->fmode & 0777) : mode;
-		inode->i_mode &= ~sf_g->fmask;
+		inode->i_mode = sf_g->o.fmode_set ? sf_g->o.fmode : mode;
+		inode->i_mode &= ~sf_g->o.fmask;
 		inode->i_mode |= S_IFLNK;
 		inode->i_op = &vboxsf_lnk_iops;
 		set_nlink(inode, 1);
 	} else {
-		inode->i_mode = sf_g->fmode != ~0 ? (sf_g->fmode & 0777) : mode;
-		inode->i_mode &= ~sf_g->fmask;
+		inode->i_mode = sf_g->o.fmode_set ? sf_g->o.fmode : mode;
+		inode->i_mode &= ~sf_g->o.fmask;
 		inode->i_mode |= S_IFREG;
 		inode->i_op = &vboxsf_reg_iops;
 		inode->i_fop = &vboxsf_reg_fops;
 		set_nlink(inode, 1);
 	}
 
-	inode->i_uid = make_kuid(current_user_ns(), sf_g->uid);
-	inode->i_gid = make_kgid(current_user_ns(), sf_g->gid);
+	inode->i_uid = sf_g->o.uid;
+	inode->i_gid = sf_g->o.gid;
 
 	inode->i_size = info->size;
 	inode->i_blkbits = 12;
@@ -187,7 +187,7 @@ int vboxsf_inode_revalidate(struct dentry *dentry)
 	prev_mtime = inode->i_mtime;
 	sf_i = GET_INODE_INFO(inode);
 	if (!sf_i->force_restat) {
-		if (time_before(jiffies, dentry->d_time + sf_g->ttl))
+		if (time_before(jiffies, dentry->d_time + sf_g->o.ttl))
 			return 0;
 	}
 
@@ -490,8 +490,10 @@ static void sf_dir_buf_free(struct sf_dir_buf *b)
 }
 
 /**
- * Create a new directory buffer descriptor.
- * Return: Created sf_dir_info buffer, or NULL when malloc fails
+ * vboxsf_dir_info_alloc - Create a new directory buffer descriptor
+ *
+ * Returns:
+ * Created sf_dir_info buffer, or NULL when malloc fails
  */
 struct sf_dir_info *vboxsf_dir_info_alloc(void)
 {
@@ -506,8 +508,8 @@ struct sf_dir_info *vboxsf_dir_info_alloc(void)
 }
 
 /**
- * Free the directory buffer.
- * @p		sf_dir_info buffer to free
+ * vboxsf_dir_info_free - Free the directory buffer
+ * @p:		sf_dir_info buffer to free
  */
 void vboxsf_dir_info_free(struct sf_dir_info *p)
 {

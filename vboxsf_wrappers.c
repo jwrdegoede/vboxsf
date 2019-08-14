@@ -30,12 +30,8 @@ int vboxsf_connect(void)
 	if (IS_ERR(gdev))
 		return -ENODEV;	/* No guest-device */
 
-#ifdef VMMDEV_REQUESTOR_KERNEL
 	err = vbg_hgcm_connect(gdev, SHFL_REQUEST, &loc,
 			       &vboxsf_client_id, &vbox_status);
-#else
-	err = vbg_hgcm_connect(gdev, &loc, &vboxsf_client_id, &vbox_status);
-#endif
 	vbg_put_gdev(gdev);
 
 	return err ? err : vbg_status_code_to_errno(vbox_status);
@@ -50,11 +46,7 @@ void vboxsf_disconnect(void)
 	if (IS_ERR(gdev))
 		return;   /* guest-device is gone, already disconnected */
 
-#ifdef VMMDEV_REQUESTOR_KERNEL
 	vbg_hgcm_disconnect(gdev, SHFL_REQUEST, vboxsf_client_id, &vbox_status);
-#else
-	vbg_hgcm_disconnect(gdev, vboxsf_client_id, &vbox_status);
-#endif
 	vbg_put_gdev(gdev);
 }
 
@@ -67,13 +59,8 @@ static int vboxsf_call(u32 function, void *parms, u32 parm_count, int *status)
 	if (IS_ERR(gdev))
 		return -ESHUTDOWN; /* guest-dev removed underneath us */
 
-#ifdef VMMDEV_REQUESTOR_KERNEL
 	err = vbg_hgcm_call(gdev, SHFL_REQUEST, vboxsf_client_id, function,
 			    U32_MAX, parms, parm_count, &vbox_status);
-#else
-	err = vbg_hgcm_call(gdev, vboxsf_client_id, function, U32_MAX,
-			    parms, parm_count, &vbox_status);
-#endif
 	vbg_put_gdev(gdev);
 
 	if (err < 0)
@@ -124,6 +111,11 @@ int vboxsf_unmap_folder(u32 root)
 }
 
 /**
+ * vboxsf_create - Create a new file or folder
+ * @root:         Root of the shared folder in which to create the file
+ * @parsed_path:  The path of the file or folder relative to the shared folder
+ * @param:        create_parms Parameters for file/folder creation.
+ *
  * Create a new file or folder or open an existing one in a shared folder.
  * Note this function always returns 0 / success unless an exceptional condition
  * occurs - out of memory, invalid arguments, etc. If the file or folder could
@@ -131,10 +123,9 @@ int vboxsf_unmap_folder(u32 root)
  * SHFL_HANDLE_NIL on return.  In this case the value in create_parms->result
  * provides information as to why (e.g. SHFL_FILE_EXISTS), create_parms->result
  * is also set on success as additional information.
- * Return: 0 or negative errno value.
- * @root	Root of the shared folder in which to create the file
- * @parsed_path	The path of the file or folder relative to the shared folder
- * @param	create_parms Parameters for file/folder creation.
+ *
+ * Returns:
+ * 0 or negative errno value.
  */
 int vboxsf_create(u32 root, struct shfl_string *parsed_path,
 		  struct shfl_createparms *create_parms)

@@ -11,10 +11,10 @@
  */
 
 #include <linux/idr.h>
+#include <linux/fs_parser.h>
 #include <linux/magic.h>
 #include <linux/module.h>
 #include <linux/nls.h>
-#include <linux/parser.h>
 #include <linux/statfs.h>
 #include <linux/vbox_utils.h>
 #include "vfsmod.h"
@@ -31,11 +31,6 @@ module_param(follow_symlinks, int, 0444);
 MODULE_PARM_DESC(follow_symlinks,
 		 "Let host resolve symlinks rather than showing them");
 
-struct fill_super_args {
-	const char *dev_name;
-	char *options;
-};
-
 static DEFINE_IDA(vboxsf_bdi_ida);
 static DEFINE_MUTEX(vboxsf_setup_mutex);
 static bool vboxsf_setup_done;
@@ -44,150 +39,125 @@ static struct kmem_cache *sf_inode_cachep;
 
 static char * const vboxsf_default_nls = CONFIG_NLS_DEFAULT;
 
-enum  { opt_name, opt_nls, opt_uid, opt_gid, opt_ttl, opt_dmode, opt_fmode,
-	opt_dmask, opt_fmask, opt_error };
+enum  { opt_nls, opt_uid, opt_gid, opt_ttl, opt_dmode, opt_fmode,
+	opt_dmask, opt_fmask };
 
-static const match_table_t vboxsf_tokens = {
-	{ opt_nls, "nls=%s" },
-	{ opt_uid, "uid=%u" },
-	{ opt_gid, "gid=%u" },
-	{ opt_ttl, "ttl=%u" },
-	{ opt_dmode, "dmode=%o" },
-	{ opt_fmode, "fmode=%o" },
-	{ opt_dmask, "dmask=%o" },
-	{ opt_fmask, "fmask=%o" },
-	{ opt_error, NULL },
+static const struct fs_parameter_spec vboxsf_param_specs[] = {
+	fsparam_string	("nls",		opt_nls),
+	fsparam_u32	("uid",		opt_uid),
+	fsparam_u32	("gid",		opt_gid),
+	fsparam_u32	("ttl",		opt_ttl),
+	fsparam_u32oct	("dmode",	opt_dmode),
+	fsparam_u32oct	("fmode",	opt_fmode),
+	fsparam_u32oct	("dmask",	opt_dmask),
+	fsparam_u32oct	("fmask",	opt_fmask),
+	{}
 };
 
-static int vboxsf_parse_options(struct sf_glob_info *sf_g, char *options)
+static const struct fs_parameter_description vboxsf_fs_parameters = {
+	.name  = "vboxsf",
+	.specs  = vboxsf_param_specs,
+};
+
+static int vboxsf_parse_param(struct fs_context *fc, struct fs_parameter *param)
 {
-	substring_t args[MAX_OPT_ARGS];
-	int value, token;
-	char *p;
+	struct vboxsf_fs_context *ctx = fc->fs_private;
+	struct fs_parse_result result;
+	kuid_t uid;
+	kgid_t gid;
+	int opt;
 
-	if (!options)
-		goto out;
+	opt = fs_parse(fc, &vboxsf_fs_parameters, param, &result);
+	if (opt < 0)
+		return opt;
 
-	if (options[0] == VBSF_MOUNT_SIGNATURE_BYTE_0 &&
-	    options[1] == VBSF_MOUNT_SIGNATURE_BYTE_1 &&
-	    options[2] == VBSF_MOUNT_SIGNATURE_BYTE_2 &&
-	    options[3] == VBSF_MOUNT_SIGNATURE_BYTE_3) {
-		vbg_err("vboxsf: Old binary mount data not supported, remove obsolete mount.vboxsf and/or update your VBoxService.\n");
-		return -EINVAL;
-	}
-
-	while ((p = strsep(&options, ",")) != NULL) {
-		if (!*p)
-			continue;
-
-		token = match_token(p, vboxsf_tokens, args);
-		switch (token) {
-		case opt_nls:
-			if (sf_g->nls_name) {
-				vbg_err("vboxsf: Cannot change nls option\n");
-				return -EINVAL;
-			}
-			sf_g->nls_name = match_strdup(&args[0]);
-			if (!sf_g->nls_name)
-				return -ENOMEM;
-			break;
-		case opt_uid:
-			if (match_int(&args[0], &value))
-				return -EINVAL;
-			sf_g->uid = value;
-			break;
-		case opt_gid:
-			if (match_int(&args[0], &value))
-				return -EINVAL;
-			sf_g->gid = value;
-			break;
-		case opt_ttl:
-			if (match_int(&args[0], &value))
-				return -EINVAL;
-			sf_g->ttl = msecs_to_jiffies(value);
-			break;
-		case opt_dmode:
-			if (match_octal(&args[0], &value))
-				return -EINVAL;
-			sf_g->dmode = value;
-			break;
-		case opt_fmode:
-			if (match_octal(&args[0], &value))
-				return -EINVAL;
-			sf_g->fmode = value;
-			break;
-		case opt_dmask:
-			if (match_octal(&args[0], &value))
-				return -EINVAL;
-			sf_g->dmask = value;
-			break;
-		case opt_fmask:
-			if (match_octal(&args[0], &value))
-				return -EINVAL;
-			sf_g->fmask = value;
-			break;
-		default:
-			vbg_err("vboxsf: Unrecognized mount option \"%s\" or missing value\n",
-				p);
+	switch (opt) {
+	case opt_nls:
+		if (fc->purpose != FS_CONTEXT_FOR_MOUNT) {
+			vbg_err("vboxsf: Cannot reconfigure nls option\n");
 			return -EINVAL;
 		}
+		ctx->nls_name = param->string;
+		param->string = NULL;
+		break;
+	case opt_uid:
+		uid = make_kuid(current_user_ns(), result.uint_32);
+		if (!uid_valid(uid))
+			return -EINVAL;
+		ctx->o.uid = uid;
+		break;
+	case opt_gid:
+		gid = make_kgid(current_user_ns(), result.uint_32);
+		if (!gid_valid(gid))
+			return -EINVAL;
+		ctx->o.gid = gid;
+		break;
+	case opt_ttl:
+		ctx->o.ttl = msecs_to_jiffies(result.uint_32);
+		break;
+	case opt_dmode:
+		if (result.uint_32 & ~0777)
+			return -EINVAL;
+		ctx->o.dmode = result.uint_32;
+		ctx->o.dmode_set = true;
+		break;
+	case opt_fmode:
+		if (result.uint_32 & ~0777)
+			return -EINVAL;
+		ctx->o.fmode = result.uint_32;
+		ctx->o.fmode_set = true;
+		break;
+	case opt_dmask:
+		if (result.uint_32 & ~07777)
+			return -EINVAL;
+		ctx->o.dmask = result.uint_32;
+		break;
+	case opt_fmask:
+		if (result.uint_32 & ~07777)
+			return -EINVAL;
+		ctx->o.fmask = result.uint_32;
+		break;
+	default:
+		return -EINVAL;
 	}
-
-out:
-	if (!sf_g->nls_name)
-		sf_g->nls_name = vboxsf_default_nls;
 
 	return 0;
 }
 
-/*
- * Called when vfs mounts the fs, should respect [flags],
- * initializes [sb], initializes root inode and dentry.
- */
-static int sf_fill_super(struct super_block *sb, void *data, int flags)
+static int vboxsf_fill_super(struct super_block *sb, struct fs_context *fc)
 {
-	struct fill_super_args *args = data;
-	struct shfl_string root_path;
+	struct vboxsf_fs_context *ctx = fc->fs_private;
+	struct shfl_string *folder_name, root_path;
 	struct sf_glob_info *sf_g;
 	struct dentry *droot;
 	struct inode *iroot;
+	char *nls_name;
 	size_t size;
 	int err;
+
+	if (!fc->source)
+		return -EINVAL;
 
 	sf_g = kzalloc(sizeof(*sf_g), GFP_KERNEL);
 	if (!sf_g)
 		return -ENOMEM;
 
+	sf_g->o = ctx->o;
 	idr_init(&sf_g->ino_idr);
 	spin_lock_init(&sf_g->ino_idr_lock);
 	sf_g->next_generation = 1;
-
-	/* Turn dev_name into a shfl_string */
-	size = strlen(args->dev_name) + 1;
-	sf_g->name = kmalloc(SHFLSTRING_HEADER_SIZE + size, GFP_KERNEL);
-	if (!sf_g->name)
-		return -ENOMEM;
-	sf_g->name->size = size;
-	sf_g->name->length = size - 1;
-	strlcpy(sf_g->name->string.utf8, args->dev_name, size);
-
-	/* ~0 means use whatever the host gives as mode info */
-	sf_g->dmode = ~0;
-	sf_g->fmode = ~0;
 	sf_g->bdi_id = -1;
 
-	err = vboxsf_parse_options(sf_g, args->options);
-	if (err)
-		goto fail_free;
-
 	/* Load nls if not utf8 */
-	if (strcmp(sf_g->nls_name, "utf8") != 0) {
-		if (sf_g->nls_name == vboxsf_default_nls)
+	nls_name = ctx->nls_name ? ctx->nls_name : vboxsf_default_nls;
+	if (strcmp(nls_name, "utf8") != 0) {
+		if (nls_name == vboxsf_default_nls)
 			sf_g->nls = load_nls_default();
 		else
-			sf_g->nls = load_nls(sf_g->nls_name);
+			sf_g->nls = load_nls(nls_name);
 
 		if (!sf_g->nls) {
+			vbg_err("vboxsf: Count not load '%s' nls\n", nls_name);
 			err = -EINVAL;
 			goto fail_free;
 		}
@@ -199,15 +169,24 @@ static int sf_fill_super(struct super_block *sb, void *data, int flags)
 		goto fail_free;
 	}
 
-	err = super_setup_bdi_name(sb, "vboxsf-%s.%d", args->dev_name,
+	err = super_setup_bdi_name(sb, "vboxsf-%s.%d", fc->source,
 				   sf_g->bdi_id);
 	if (err)
 		goto fail_free;
 
-	err = vboxsf_map_folder(sf_g->name, &sf_g->root);
+	/* Turn source into a shfl_string and map the folder */
+	size = strlen(fc->source) + 1;
+	folder_name = kmalloc(SHFLSTRING_HEADER_SIZE + size, GFP_KERNEL);
+	if (!folder_name)
+		goto fail_free;
+	folder_name->size = size;
+	folder_name->length = size - 1;
+	strlcpy(folder_name->string.utf8, fc->source, size);
+	err = vboxsf_map_folder(folder_name, &sf_g->root);
+	kfree(folder_name);
 	if (err) {
 		vbg_err("vboxsf: Host rejected mount of '%s' with error %d\n",
-			args->dev_name, err);
+			fc->source, err);
 		goto fail_free;
 	}
 
@@ -250,9 +229,7 @@ fail_free:
 		ida_simple_remove(&vboxsf_bdi_ida, sf_g->bdi_id);
 	if (sf_g->nls)
 		unload_nls(sf_g->nls);
-	if (sf_g->nls_name != vboxsf_default_nls)
-		kfree(sf_g->nls_name);
-	kfree(sf_g->name);
+	idr_destroy(&sf_g->ino_idr);
 	kfree(sf_g);
 	return err;
 }
@@ -295,24 +272,16 @@ static void sf_destroy_inode(struct inode *inode)
 	call_rcu(&inode->i_rcu, sf_i_callback);
 }
 
-/*
- * vfs is done with [sb] (umount called) call [sf_glob_free] to unmap
- * the folder and free [sf_g]
- */
 static void sf_put_super(struct super_block *sb)
 {
 	struct sf_glob_info *sf_g = GET_GLOB_INFO(sb);
 
-	generic_shutdown_super(sb);
 	vboxsf_unmap_folder(sf_g->root);
-	idr_destroy(&sf_g->ino_idr);
 	if (sf_g->bdi_id >= 0)
 		ida_simple_remove(&vboxsf_bdi_ida, sf_g->bdi_id);
 	if (sf_g->nls)
 		unload_nls(sf_g->nls);
-	if (sf_g->nls_name != vboxsf_default_nls)
-		kfree(sf_g->nls_name);
-	kfree(sf_g->name);
+	idr_destroy(&sf_g->ino_idr);
 	kfree(sf_g);
 }
 
@@ -355,32 +324,11 @@ static int sf_statfs(struct dentry *dentry, struct kstatfs *stat)
 	return 0;
 }
 
-static int sf_remount_fs(struct super_block *sb, int *flags, char *options)
-{
-	struct sf_glob_info *sf_g = GET_GLOB_INFO(sb);
-	struct inode *iroot;
-	int err;
-
-	err = vboxsf_parse_options(sf_g, options);
-	if (err)
-		return err;
-
-	iroot = ilookup(sb, 0);
-	if (!iroot)
-		return -ENOENT;
-
-	/* Apply changed options to the root inode */
-	vboxsf_init_inode(sf_g, iroot, &sf_g->root_info);
-
-	return 0;
-}
-
 static struct super_operations vboxsf_super_ops = {
 	.alloc_inode	= sf_alloc_inode,
 	.destroy_inode	= sf_destroy_inode,
 	.put_super	= sf_put_super,
 	.statfs		= sf_statfs,
-	.remount_fs	= sf_remount_fs
 };
 
 static int vboxsf_setup(void)
@@ -436,27 +384,86 @@ fail_nomem:
 	return err;
 }
 
-static struct dentry *sf_mount(struct file_system_type *fs_type, int flags,
-			       const char *dev_name, void *data)
+int vboxsf_parse_monolithic(struct fs_context *fc, void *data)
 {
-	struct fill_super_args args = {
-		.dev_name = dev_name,
-		.options = data,
-	};
+	char *options = data;
+
+	if (options && options[0] == VBSF_MOUNT_SIGNATURE_BYTE_0 &&
+		       options[1] == VBSF_MOUNT_SIGNATURE_BYTE_1 &&
+		       options[2] == VBSF_MOUNT_SIGNATURE_BYTE_2 &&
+		       options[3] == VBSF_MOUNT_SIGNATURE_BYTE_3) {
+		vbg_err("vboxsf: Old binary mount data not supported, remove obsolete mount.vboxsf and/or update your VBoxService.\n");
+		return -EINVAL;
+	}
+
+	return generic_parse_monolithic(fc, data);
+}
+
+static int vboxsf_get_tree(struct fs_context *fc)
+{
 	int err;
 
 	err = vboxsf_setup();
 	if (err)
-		return ERR_PTR(err);
+		return err;
 
-	return mount_nodev(fs_type, flags, &args, sf_fill_super);
+	return vfs_get_super(fc, vfs_get_independent_super, vboxsf_fill_super);
+}
+
+static int vboxsf_reconfigure(struct fs_context *fc)
+{
+	struct sf_glob_info *sf_g = GET_GLOB_INFO(fc->root->d_sb);
+	struct vboxsf_fs_context *ctx = fc->fs_private;
+	struct inode *iroot;
+
+	iroot = ilookup(fc->root->d_sb, 0);
+	if (!iroot)
+		return -ENOENT;
+
+	/* Apply changed options to the root inode */
+	sf_g->o = ctx->o;
+	vboxsf_init_inode(sf_g, iroot, &sf_g->root_info);
+
+	return 0;
+}
+
+static void vboxsf_free_fc(struct fs_context *fc)
+{
+	struct vboxsf_fs_context *ctx = fc->fs_private;
+
+	kfree(ctx->nls_name);
+	kfree(ctx);
+}
+
+static const struct fs_context_operations vboxsf_context_ops = {
+	.free			= vboxsf_free_fc,
+	.parse_param		= vboxsf_parse_param,
+	.parse_monolithic	= vboxsf_parse_monolithic,
+	.get_tree		= vboxsf_get_tree,
+	.reconfigure		= vboxsf_reconfigure,
+};
+
+static int vboxsf_init_fs_context(struct fs_context *fc)
+{
+	struct vboxsf_fs_context *ctx;
+
+	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
+	if (!ctx)
+		return -ENOMEM;
+
+	current_uid_gid(&ctx->o.uid, &ctx->o.gid);
+
+	fc->fs_private = ctx;
+	fc->ops = &vboxsf_context_ops;
+	return 0;
 }
 
 static struct file_system_type vboxsf_fs_type = {
-	.owner = THIS_MODULE,
-	.name = "vboxsf",
-	.mount = sf_mount,
-	.kill_sb = kill_anon_super
+	.owner			= THIS_MODULE,
+	.name			= "vboxsf",
+	.init_fs_context	= vboxsf_init_fs_context,
+	.parameters		= &vboxsf_fs_parameters,
+	.kill_sb		= kill_anon_super
 };
 
 /* Module initialization/finalization handlers */
