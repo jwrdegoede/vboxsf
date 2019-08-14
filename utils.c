@@ -415,48 +415,42 @@ struct shfl_string *vboxsf_path_from_dentry(struct sf_glob_info *sf_g,
 int vboxsf_nlscpy(struct sf_glob_info *sf_g, char *name, size_t name_bound_len,
 		  const unsigned char *utf8_name, size_t utf8_len)
 {
-	if (sf_g->nls) {
-		const char *in;
-		char *out;
-		size_t out_len;
-		size_t out_bound_len;
-		size_t in_bound_len;
+	const char *in;
+	char *out;
+	size_t out_len;
+	size_t out_bound_len;
+	size_t in_bound_len;
 
-		in = utf8_name;
-		in_bound_len = utf8_len;
+	in = utf8_name;
+	in_bound_len = utf8_len;
 
-		out = name;
-		out_len = 0;
-		/* Reserve space for terminating 0 */
-		out_bound_len = name_bound_len - 1;
+	out = name;
+	out_len = 0;
+	/* Reserve space for terminating 0 */
+	out_bound_len = name_bound_len - 1;
 
-		while (in_bound_len) {
-			int nb;
-			unicode_t uni;
+	while (in_bound_len) {
+		int nb;
+		unicode_t uni;
 
-			nb = utf8_to_utf32(in, in_bound_len, &uni);
-			if (nb < 0)
-				return -EINVAL;
+		nb = utf8_to_utf32(in, in_bound_len, &uni);
+		if (nb < 0)
+			return -EINVAL;
 
-			in += nb;
-			in_bound_len -= nb;
+		in += nb;
+		in_bound_len -= nb;
 
-			nb = sf_g->nls->uni2char(uni, out, out_bound_len);
-			if (nb < 0)
-				return nb;
+		nb = sf_g->nls->uni2char(uni, out, out_bound_len);
+		if (nb < 0)
+			return nb;
 
-			out += nb;
-			out_bound_len -= nb;
-			out_len += nb;
-		}
-
-		*out = 0;
-	} else {
-		if (utf8_len + 1 > name_bound_len)
-			return -ENAMETOOLONG;
-
-		memcpy(name, utf8_name, utf8_len + 1);
+		out += nb;
+		out_bound_len -= nb;
+		out_len += nb;
 	}
+
+	*out = 0;
+
 	return 0;
 }
 
