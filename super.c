@@ -258,10 +258,11 @@ static struct inode *vboxsf_alloc_inode(struct super_block *sb)
 static void vboxsf_free_inode(struct inode *inode)
 {
 	struct vboxsf_sbi *sbi = VBOXSF_SBI(inode->i_sb);
+	unsigned long flags;
 
-	spin_lock(&sbi->ino_idr_lock);
+	spin_lock_irqsave(&sbi->ino_idr_lock, flags);
 	idr_remove(&sbi->ino_idr, inode->i_ino);
-	spin_unlock(&sbi->ino_idr_lock);
+	spin_unlock_irqrestore(&sbi->ino_idr_lock, flags);
 	kmem_cache_free(vboxsf_inode_cachep, VBOXSF_I(inode));
 }
 

@@ -16,6 +16,7 @@ struct inode *vboxsf_new_inode(struct super_block *sb)
 {
 	struct vboxsf_sbi *sbi = VBOXSF_SBI(sb);
 	struct inode *inode;
+	unsigned long flags;
 	int cursor, ret;
 	u32 gen;
 
@@ -24,13 +25,13 @@ struct inode *vboxsf_new_inode(struct super_block *sb)
 		return ERR_PTR(-ENOMEM);
 
 	idr_preload(GFP_KERNEL);
-	spin_lock(&sbi->ino_idr_lock);
+	spin_lock_irqsave(&sbi->ino_idr_lock, flags);
 	cursor = idr_get_cursor(&sbi->ino_idr);
 	ret = idr_alloc_cyclic(&sbi->ino_idr, inode, 1, 0, GFP_ATOMIC);
 	if (ret >= 0 && ret < cursor)
 		sbi->next_generation++;
 	gen = sbi->next_generation;
-	spin_unlock(&sbi->ino_idr_lock);
+	spin_unlock_irqrestore(&sbi->ino_idr_lock, flags);
 	idr_preload_end();
 
 	if (ret < 0) {
