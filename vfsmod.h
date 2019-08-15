@@ -16,9 +16,8 @@
 #define DIR_BUFFER_SIZE SZ_16K
 
 /* The cast is to prevent assignment of void * to pointers of arbitrary type */
-#define GET_GLOB_INFO(sb)       ((struct sf_glob_info *)(sb)->s_fs_info)
-#define SET_GLOB_INFO(sb, sf_g) ((sb)->s_fs_info = (sf_g))
-#define GET_INODE_INFO(i)       container_of(i, struct vboxsf_inode, vfs_inode)
+#define VBOXSF_SBI(sb)	((struct vboxsf_sbi *)(sb)->s_fs_info)
+#define VBOXSF_I(i)	container_of(i, struct vboxsf_inode, vfs_inode)
 
 struct vboxsf_options {
 	unsigned long ttl;
@@ -38,7 +37,7 @@ struct vboxsf_fs_context {
 };
 
 /* per-shared folder information */
-struct sf_glob_info {
+struct vboxsf_sbi {
 	struct vboxsf_options o;
 	struct shfl_fsobjinfo root_info;
 	struct idr ino_idr;
@@ -83,24 +82,24 @@ extern const struct dentry_operations vboxsf_dentry_ops;
 
 /* from utils.c */
 struct inode *vboxsf_new_inode(struct super_block *sb);
-void vboxsf_init_inode(struct sf_glob_info *sf_g, struct inode *inode,
+void vboxsf_init_inode(struct vboxsf_sbi *sbi, struct inode *inode,
 		       const struct shfl_fsobjinfo *info);
 int vboxsf_create_at_dentry(struct dentry *dentry,
 			    struct shfl_createparms *params);
-int vboxsf_stat(struct sf_glob_info *sf_g, struct shfl_string *path,
+int vboxsf_stat(struct vboxsf_sbi *sbi, struct shfl_string *path,
 		struct shfl_fsobjinfo *info);
 int vboxsf_stat_dentry(struct dentry *dentry, struct shfl_fsobjinfo *info);
 int vboxsf_inode_revalidate(struct dentry *dentry);
 int vboxsf_getattr(const struct path *path, struct kstat *kstat,
 		   u32 request_mask, unsigned int query_flags);
 int vboxsf_setattr(struct dentry *dentry, struct iattr *iattr);
-struct shfl_string *vboxsf_path_from_dentry(struct sf_glob_info *sf_g,
+struct shfl_string *vboxsf_path_from_dentry(struct vboxsf_sbi *sbi,
 					    struct dentry *dentry);
-int vboxsf_nlscpy(struct sf_glob_info *sf_g, char *name, size_t name_bound_len,
+int vboxsf_nlscpy(struct vboxsf_sbi *sbi, char *name, size_t name_bound_len,
 		  const unsigned char *utf8_name, size_t utf8_len);
 struct vboxsf_dir_info *vboxsf_dir_info_alloc(void);
 void vboxsf_dir_info_free(struct vboxsf_dir_info *p);
-int vboxsf_dir_read_all(struct sf_glob_info *sf_g, struct vboxsf_dir_info *sf_d,
+int vboxsf_dir_read_all(struct vboxsf_sbi *sbi, struct vboxsf_dir_info *sf_d,
 			u64 handle);
 
 /* from vboxsf_wrappers.c */

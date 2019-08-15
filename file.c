@@ -22,7 +22,7 @@ struct vboxsf_handle {
 
 static int vboxsf_file_open(struct inode *inode, struct file *file)
 {
-	struct vboxsf_inode *sf_i = GET_INODE_INFO(inode);
+	struct vboxsf_inode *sf_i = VBOXSF_I(inode);
 	struct shfl_createparms params = {};
 	struct vboxsf_handle *sf_handle;
 	u32 access_flags = 0;
@@ -93,7 +93,7 @@ static int vboxsf_file_open(struct inode *inode, struct file *file)
 
 	/* init our handle struct and add it to the inode's handles list */
 	sf_handle->handle = params.handle;
-	sf_handle->root = GET_GLOB_INFO(inode->i_sb)->root;
+	sf_handle->root = VBOXSF_SBI(inode->i_sb)->root;
 	sf_handle->access_flags = access_flags;
 	kref_init(&sf_handle->refcount);
 
@@ -116,7 +116,7 @@ static void vboxsf_handle_release(struct kref *refcount)
 
 static int vboxsf_file_release(struct inode *inode, struct file *file)
 {
-	struct vboxsf_inode *sf_i = GET_INODE_INFO(inode);
+	struct vboxsf_inode *sf_i = VBOXSF_I(inode);
 	struct vboxsf_handle *sf_handle = file->private_data;
 
 	filemap_write_and_wait(inode->i_mapping);
@@ -241,7 +241,7 @@ static struct vboxsf_handle *vboxsf_get_write_handle(struct vboxsf_inode *sf_i)
 static int vboxsf_writepage(struct page *page, struct writeback_control *wbc)
 {
 	struct inode *inode = page->mapping->host;
-	struct vboxsf_inode *sf_i = GET_INODE_INFO(inode);
+	struct vboxsf_inode *sf_i = VBOXSF_I(inode);
 	struct vboxsf_handle *sf_handle;
 	loff_t off = page_offset(page);
 	loff_t size = i_size_read(inode);
@@ -297,7 +297,7 @@ static int vboxsf_write_end(struct file *file, struct address_space *mapping,
 	}
 
 	/* mtime changed */
-	GET_INODE_INFO(inode)->force_restat = 1;
+	VBOXSF_I(inode)->force_restat = 1;
 
 	if (!PageUptodate(page) && nwritten == PAGE_SIZE)
 		SetPageUptodate(page);
@@ -324,7 +324,7 @@ const struct address_space_operations vboxsf_reg_aops = {
 static const char *vboxsf_get_link(struct dentry *dentry, struct inode *inode,
 				   struct delayed_call *done)
 {
-	struct sf_glob_info *sf_g = GET_GLOB_INFO(inode->i_sb);
+	struct vboxsf_sbi *sbi = VBOXSF_SBI(inode->i_sb);
 	struct shfl_string *path;
 	char *link;
 	int err;
@@ -332,7 +332,7 @@ static const char *vboxsf_get_link(struct dentry *dentry, struct inode *inode,
 	if (!dentry)
 		return ERR_PTR(-ECHILD);
 
-	path = vboxsf_path_from_dentry(sf_g, dentry);
+	path = vboxsf_path_from_dentry(sbi, dentry);
 	if (IS_ERR(path))
 		return (char *)path;
 
@@ -342,7 +342,7 @@ static const char *vboxsf_get_link(struct dentry *dentry, struct inode *inode,
 		return ERR_PTR(-ENOMEM);
 	}
 
-	err = vboxsf_readlink(sf_g->root, path, PATH_MAX, link);
+	err = vboxsf_readlink(sbi->root, path, PATH_MAX, link);
 	__putname(path);
 	if (err) {
 		kfree(link);

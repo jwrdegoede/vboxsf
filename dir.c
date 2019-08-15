@@ -11,7 +11,7 @@
 
 static int vboxsf_dir_open(struct inode *inode, struct file *file)
 {
-	struct sf_glob_info *sf_g = GET_GLOB_INFO(inode->i_sb);
+	struct vboxsf_sbi *sbi = VBOXSF_SBI(inode->i_sb);
 	struct shfl_createparms params = {};
 	struct vboxsf_dir_info *sf_d;
 	int err;
@@ -27,13 +27,13 @@ static int vboxsf_dir_open(struct inode *inode, struct file *file)
 	err = vboxsf_create_at_dentry(file_dentry(file), &params);
 	if (err == 0) {
 		if (params.result == SHFL_FILE_EXISTS) {
-			err = vboxsf_dir_read_all(sf_g, sf_d, params.handle);
+			err = vboxsf_dir_read_all(sbi, sf_d, params.handle);
 			if (!err)
 				file->private_data = sf_d;
 		} else
 			err = -ENOENT;
 
-		vboxsf_close(sf_g->root, params.handle);
+		vboxsf_close(sbi->root, params.handle);
 	}
 
 	if (err)
@@ -88,7 +88,7 @@ static unsigned int vboxsf_get_d_type(u32 mode)
 
 static bool vboxsf_dir_emit(struct file *dir, struct dir_context *ctx)
 {
-	struct sf_glob_info *sf_g = GET_GLOB_INFO(file_inode(dir)->i_sb);
+	struct vboxsf_sbi *sbi = VBOXSF_SBI(file_inode(dir)->i_sb);
 	struct vboxsf_dir_info *sf_d = dir->private_data;
 	struct shfl_dirinfo *info;
 	struct vboxsf_dir_buf *b;
@@ -131,10 +131,10 @@ try_next_entry:
 		}
 		fake_ino = ctx->pos + 1;
 
-		if (sf_g->nls) {
+		if (sbi->nls) {
 			char d_name[NAME_MAX];
 
-			err = vboxsf_nlscpy(sf_g, d_name, NAME_MAX,
+			err = vboxsf_nlscpy(sbi, d_name, NAME_MAX,
 					    info->name.string.utf8,
 					    info->name.length);
 			if (err) {
@@ -199,7 +199,7 @@ static struct dentry *vboxsf_dir_lookup(struct inode *parent,
 					struct dentry *dentry,
 					unsigned int flags)
 {
-	struct sf_glob_info *sf_g = GET_GLOB_INFO(parent->i_sb);
+	struct vboxsf_sbi *sbi = VBOXSF_SBI(parent->i_sb);
 	struct shfl_fsobjinfo fsinfo;
 	struct inode *inode;
 	int err;
@@ -212,7 +212,7 @@ static struct dentry *vboxsf_dir_lookup(struct inode *parent,
 	} else {
 		inode = vboxsf_new_inode(parent->i_sb);
 		if (!IS_ERR(inode))
-			vboxsf_init_inode(sf_g, inode, &fsinfo);
+			vboxsf_init_inode(sbi, inode, &fsinfo);
 	}
 
 	return d_splice_alias(inode, dentry);
@@ -221,7 +221,7 @@ static struct dentry *vboxsf_dir_lookup(struct inode *parent,
 static int vboxsf_dir_instantiate(struct inode *parent, struct dentry *dentry,
 				  struct shfl_fsobjinfo *info)
 {
-	struct sf_glob_info *sf_g = GET_GLOB_INFO(parent->i_sb);
+	struct vboxsf_sbi *sbi = VBOXSF_SBI(parent->i_sb);
 	struct vboxsf_inode *sf_i;
 	struct inode *inode;
 
@@ -229,10 +229,10 @@ static int vboxsf_dir_instantiate(struct inode *parent, struct dentry *dentry,
 	if (IS_ERR(inode))
 		return PTR_ERR(inode);
 
-	sf_i = GET_INODE_INFO(inode);
+	sf_i = VBOXSF_I(inode);
 	/* The host may have given us different attr then requested */
 	sf_i->force_restat = 1;
-	vboxsf_init_inode(sf_g, inode, info);
+	vboxsf_init_inode(sbi, inode, info);
 
 	d_instantiate(dentry, inode);
 
@@ -242,8 +242,8 @@ static int vboxsf_dir_instantiate(struct inode *parent, struct dentry *dentry,
 static int vboxsf_dir_create(struct inode *parent, struct dentry *dentry,
 			     umode_t mode, int is_dir)
 {
-	struct vboxsf_inode *sf_parent_i = GET_INODE_INFO(parent);
-	struct sf_glob_info *sf_g = GET_GLOB_INFO(parent->i_sb);
+	struct vboxsf_inode *sf_parent_i = VBOXSF_I(parent);
+	struct vboxsf_sbi *sbi = VBOXSF_SBI(parent->i_sb);
 	struct shfl_createparms params = {};
 	int err;
 
@@ -263,7 +263,7 @@ static int vboxsf_dir_create(struct inode *parent, struct dentry *dentry,
 	if (params.result != SHFL_FILE_CREATED)
 		return -EPERM;
 
-	vboxsf_close(sf_g->root, params.handle);
+	vboxsf_close(sbi->root, params.handle);
 
 	err = vboxsf_dir_instantiate(parent, dentry, &params.info);
 	if (err)
@@ -289,8 +289,8 @@ static int vboxsf_dir_mkdir(struct inode *parent, struct dentry *dentry,
 
 static int vboxsf_dir_unlink(struct inode *parent, struct dentry *dentry)
 {
-	struct sf_glob_info *sf_g = GET_GLOB_INFO(parent->i_sb);
-	struct vboxsf_inode *sf_parent_i = GET_INODE_INFO(parent);
+	struct vboxsf_sbi *sbi = VBOXSF_SBI(parent->i_sb);
+	struct vboxsf_inode *sf_parent_i = VBOXSF_I(parent);
 	struct inode *inode = d_inode(dentry);
 	struct shfl_string *path;
 	uint32_t flags;
@@ -304,11 +304,11 @@ static int vboxsf_dir_unlink(struct inode *parent, struct dentry *dentry)
 	if (S_ISLNK(inode->i_mode))
 		flags |= SHFL_REMOVE_SYMLINK;
 
-	path = vboxsf_path_from_dentry(sf_g, dentry);
+	path = vboxsf_path_from_dentry(sbi, dentry);
 	if (IS_ERR(path))
 		return PTR_ERR(path);
 
-	err = vboxsf_remove(sf_g->root, path, flags);
+	err = vboxsf_remove(sbi->root, path, flags);
 	__putname(path);
 	if (err)
 		return err;
@@ -325,9 +325,9 @@ static int vboxsf_dir_rename(struct inode *old_parent,
 			     struct dentry *new_dentry,
 			     unsigned int flags)
 {
-	struct sf_glob_info *sf_g = GET_GLOB_INFO(old_parent->i_sb);
-	struct vboxsf_inode *sf_old_parent_i = GET_INODE_INFO(old_parent);
-	struct vboxsf_inode *sf_new_parent_i = GET_INODE_INFO(new_parent);
+	struct vboxsf_sbi *sbi = VBOXSF_SBI(old_parent->i_sb);
+	struct vboxsf_inode *sf_old_parent_i = VBOXSF_I(old_parent);
+	struct vboxsf_inode *sf_new_parent_i = VBOXSF_I(new_parent);
 	u32 shfl_flags = SHFL_RENAME_FILE | SHFL_RENAME_REPLACE_IF_EXISTS;
 	struct shfl_string *old_path, *new_path;
 	int err;
@@ -335,11 +335,11 @@ static int vboxsf_dir_rename(struct inode *old_parent,
 	if (flags)
 		return -EINVAL;
 
-	old_path = vboxsf_path_from_dentry(sf_g, old_dentry);
+	old_path = vboxsf_path_from_dentry(sbi, old_dentry);
 	if (IS_ERR(old_path))
 		return PTR_ERR(old_path);
 
-	new_path = vboxsf_path_from_dentry(sf_g, new_dentry);
+	new_path = vboxsf_path_from_dentry(sbi, new_dentry);
 	if (IS_ERR(new_path)) {
 		__putname(old_path);
 		return PTR_ERR(new_path);
@@ -348,7 +348,7 @@ static int vboxsf_dir_rename(struct inode *old_parent,
 	if (d_inode(old_dentry)->i_mode & S_IFDIR)
 		shfl_flags = 0;
 
-	err = vboxsf_rename(sf_g->root, old_path, new_path, shfl_flags);
+	err = vboxsf_rename(sbi->root, old_path, new_path, shfl_flags);
 	if (err == 0) {
 		/* parent directories access/change time changed */
 		sf_new_parent_i->force_restat = 1;
@@ -363,14 +363,14 @@ static int vboxsf_dir_rename(struct inode *old_parent,
 static int vboxsf_dir_symlink(struct inode *parent, struct dentry *dentry,
 			      const char *symname)
 {
-	struct vboxsf_inode *sf_parent_i = GET_INODE_INFO(parent);
-	struct sf_glob_info *sf_g = GET_GLOB_INFO(parent->i_sb);
+	struct vboxsf_inode *sf_parent_i = VBOXSF_I(parent);
+	struct vboxsf_sbi *sbi = VBOXSF_SBI(parent->i_sb);
 	int symname_size = strlen(symname) + 1;
 	struct shfl_string *path, *ssymname;
 	struct shfl_fsobjinfo info;
 	int err;
 
-	path = vboxsf_path_from_dentry(sf_g, dentry);
+	path = vboxsf_path_from_dentry(sbi, dentry);
 	if (IS_ERR(path))
 		return PTR_ERR(path);
 
@@ -383,7 +383,7 @@ static int vboxsf_dir_symlink(struct inode *parent, struct dentry *dentry,
 	ssymname->size = symname_size;
 	memcpy(ssymname->string.utf8, symname, symname_size);
 
-	err = vboxsf_symlink(sf_g->root, path, ssymname, &info);
+	err = vboxsf_symlink(sbi->root, path, ssymname, &info);
 	kfree(ssymname);
 	__putname(path);
 	if (err) {

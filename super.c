@@ -128,7 +128,7 @@ static int vboxsf_fill_super(struct super_block *sb, struct fs_context *fc)
 {
 	struct vboxsf_fs_context *ctx = fc->fs_private;
 	struct shfl_string *folder_name, root_path;
-	struct sf_glob_info *sf_g;
+	struct vboxsf_sbi *sbi;
 	struct dentry *droot;
 	struct inode *iroot;
 	char *nls_name;
@@ -138,39 +138,38 @@ static int vboxsf_fill_super(struct super_block *sb, struct fs_context *fc)
 	if (!fc->source)
 		return -EINVAL;
 
-	sf_g = kzalloc(sizeof(*sf_g), GFP_KERNEL);
-	if (!sf_g)
+	sbi = kzalloc(sizeof(*sbi), GFP_KERNEL);
+	if (!sbi)
 		return -ENOMEM;
 
-	sf_g->o = ctx->o;
-	idr_init(&sf_g->ino_idr);
-	spin_lock_init(&sf_g->ino_idr_lock);
-	sf_g->next_generation = 1;
-	sf_g->bdi_id = -1;
+	sbi->o = ctx->o;
+	idr_init(&sbi->ino_idr);
+	spin_lock_init(&sbi->ino_idr_lock);
+	sbi->next_generation = 1;
+	sbi->bdi_id = -1;
 
 	/* Load nls if not utf8 */
 	nls_name = ctx->nls_name ? ctx->nls_name : vboxsf_default_nls;
 	if (strcmp(nls_name, "utf8") != 0) {
 		if (nls_name == vboxsf_default_nls)
-			sf_g->nls = load_nls_default();
+			sbi->nls = load_nls_default();
 		else
-			sf_g->nls = load_nls(nls_name);
+			sbi->nls = load_nls(nls_name);
 
-		if (!sf_g->nls) {
+		if (!sbi->nls) {
 			vbg_err("vboxsf: Count not load '%s' nls\n", nls_name);
 			err = -EINVAL;
 			goto fail_free;
 		}
 	}
 
-	sf_g->bdi_id = ida_simple_get(&vboxsf_bdi_ida, 0, 0, GFP_KERNEL);
-	if (sf_g->bdi_id < 0) {
-		err = sf_g->bdi_id;
+	sbi->bdi_id = ida_simple_get(&vboxsf_bdi_ida, 0, 0, GFP_KERNEL);
+	if (sbi->bdi_id < 0) {
+		err = sbi->bdi_id;
 		goto fail_free;
 	}
 
-	err = super_setup_bdi_name(sb, "vboxsf-%s.%d", fc->source,
-				   sf_g->bdi_id);
+	err = super_setup_bdi_name(sb, "vboxsf-%s.%d", fc->source, sbi->bdi_id);
 	if (err)
 		goto fail_free;
 
@@ -182,7 +181,7 @@ static int vboxsf_fill_super(struct super_block *sb, struct fs_context *fc)
 	folder_name->size = size;
 	folder_name->length = size - 1;
 	strlcpy(folder_name->string.utf8, fc->source, size);
-	err = vboxsf_map_folder(folder_name, &sf_g->root);
+	err = vboxsf_map_folder(folder_name, &sbi->root);
 	kfree(folder_name);
 	if (err) {
 		vbg_err("vboxsf: Host rejected mount of '%s' with error %d\n",
@@ -194,7 +193,7 @@ static int vboxsf_fill_super(struct super_block *sb, struct fs_context *fc)
 	root_path.size = 2;
 	root_path.string.utf8[0] = '/';
 	root_path.string.utf8[1] = 0;
-	err = vboxsf_stat(sf_g, &root_path, &sf_g->root_info);
+	err = vboxsf_stat(sbi, &root_path, &sbi->root_info);
 	if (err)
 		goto fail_unmap;
 
@@ -209,7 +208,7 @@ static int vboxsf_fill_super(struct super_block *sb, struct fs_context *fc)
 		err = -ENOMEM;
 		goto fail_unmap;
 	}
-	vboxsf_init_inode(sf_g, iroot, &sf_g->root_info);
+	vboxsf_init_inode(sbi, iroot, &sbi->root_info);
 	unlock_new_inode(iroot);
 
 	droot = d_make_root(iroot);
@@ -219,18 +218,18 @@ static int vboxsf_fill_super(struct super_block *sb, struct fs_context *fc)
 	}
 
 	sb->s_root = droot;
-	SET_GLOB_INFO(sb, sf_g);
+	sb->s_fs_info = sbi;
 	return 0;
 
 fail_unmap:
-	vboxsf_unmap_folder(sf_g->root);
+	vboxsf_unmap_folder(sbi->root);
 fail_free:
-	if (sf_g->bdi_id >= 0)
-		ida_simple_remove(&vboxsf_bdi_ida, sf_g->bdi_id);
-	if (sf_g->nls)
-		unload_nls(sf_g->nls);
-	idr_destroy(&sf_g->ino_idr);
-	kfree(sf_g);
+	if (sbi->bdi_id >= 0)
+		ida_simple_remove(&vboxsf_bdi_ida, sbi->bdi_id);
+	if (sbi->nls)
+		unload_nls(sbi->nls);
+	idr_destroy(&sbi->ino_idr);
+	kfree(sbi);
 	return err;
 }
 
@@ -259,12 +258,12 @@ static struct inode *sf_alloc_inode(struct super_block *sb)
 static void sf_i_callback(struct rcu_head *head)
 {
 	struct inode *inode = container_of(head, struct inode, i_rcu);
-	struct sf_glob_info *sf_g = GET_GLOB_INFO(inode->i_sb);
+	struct vboxsf_sbi *sbi = VBOXSF_SBI(inode->i_sb);
 
-	spin_lock(&sf_g->ino_idr_lock);
-	idr_remove(&sf_g->ino_idr, inode->i_ino);
-	spin_unlock(&sf_g->ino_idr_lock);
-	kmem_cache_free(sf_inode_cachep, GET_INODE_INFO(inode));
+	spin_lock(&sbi->ino_idr_lock);
+	idr_remove(&sbi->ino_idr, inode->i_ino);
+	spin_unlock(&sbi->ino_idr_lock);
+	kmem_cache_free(sf_inode_cachep, VBOXSF_I(inode));
 }
 
 static void sf_destroy_inode(struct inode *inode)
@@ -274,28 +273,28 @@ static void sf_destroy_inode(struct inode *inode)
 
 static void sf_put_super(struct super_block *sb)
 {
-	struct sf_glob_info *sf_g = GET_GLOB_INFO(sb);
+	struct vboxsf_sbi *sbi = VBOXSF_SBI(sb);
 
-	vboxsf_unmap_folder(sf_g->root);
-	if (sf_g->bdi_id >= 0)
-		ida_simple_remove(&vboxsf_bdi_ida, sf_g->bdi_id);
-	if (sf_g->nls)
-		unload_nls(sf_g->nls);
-	idr_destroy(&sf_g->ino_idr);
-	kfree(sf_g);
+	vboxsf_unmap_folder(sbi->root);
+	if (sbi->bdi_id >= 0)
+		ida_simple_remove(&vboxsf_bdi_ida, sbi->bdi_id);
+	if (sbi->nls)
+		unload_nls(sbi->nls);
+	idr_destroy(&sbi->ino_idr);
+	kfree(sbi);
 }
 
 static int sf_statfs(struct dentry *dentry, struct kstatfs *stat)
 {
 	struct super_block *sb = dentry->d_sb;
 	struct shfl_volinfo SHFLVolumeInfo;
-	struct sf_glob_info *sf_g;
+	struct vboxsf_sbi *sbi;
 	u32 buf_len;
 	int err;
 
-	sf_g = GET_GLOB_INFO(sb);
+	sbi = VBOXSF_SBI(sb);
 	buf_len = sizeof(SHFLVolumeInfo);
-	err = vboxsf_fsinfo(sf_g->root, 0, SHFL_INFO_GET | SHFL_INFO_VOLUME,
+	err = vboxsf_fsinfo(sbi->root, 0, SHFL_INFO_GET | SHFL_INFO_VOLUME,
 			    &buf_len, &SHFLVolumeInfo);
 	if (err)
 		return err;
@@ -412,7 +411,7 @@ static int vboxsf_get_tree(struct fs_context *fc)
 
 static int vboxsf_reconfigure(struct fs_context *fc)
 {
-	struct sf_glob_info *sf_g = GET_GLOB_INFO(fc->root->d_sb);
+	struct vboxsf_sbi *sbi = VBOXSF_SBI(fc->root->d_sb);
 	struct vboxsf_fs_context *ctx = fc->fs_private;
 	struct inode *iroot;
 
@@ -421,8 +420,8 @@ static int vboxsf_reconfigure(struct fs_context *fc)
 		return -ENOENT;
 
 	/* Apply changed options to the root inode */
-	sf_g->o = ctx->o;
-	vboxsf_init_inode(sf_g, iroot, &sf_g->root_info);
+	sbi->o = ctx->o;
+	vboxsf_init_inode(sbi, iroot, &sbi->root_info);
 
 	return 0;
 }

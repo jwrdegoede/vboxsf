@@ -14,7 +14,7 @@
 
 struct inode *vboxsf_new_inode(struct super_block *sb)
 {
-	struct sf_glob_info *sf_g = GET_GLOB_INFO(sb);
+	struct vboxsf_sbi *sbi = VBOXSF_SBI(sb);
 	struct inode *inode;
 	int cursor, ret;
 	u32 gen;
@@ -24,13 +24,13 @@ struct inode *vboxsf_new_inode(struct super_block *sb)
 		return ERR_PTR(-ENOMEM);
 
 	idr_preload(GFP_KERNEL);
-	spin_lock(&sf_g->ino_idr_lock);
-	cursor = idr_get_cursor(&sf_g->ino_idr);
-	ret = idr_alloc_cyclic(&sf_g->ino_idr, inode, 1, 0, GFP_ATOMIC);
+	spin_lock(&sbi->ino_idr_lock);
+	cursor = idr_get_cursor(&sbi->ino_idr);
+	ret = idr_alloc_cyclic(&sbi->ino_idr, inode, 1, 0, GFP_ATOMIC);
 	if (ret >= 0 && ret < cursor)
-		sf_g->next_generation++;
-	gen = sf_g->next_generation;
-	spin_unlock(&sf_g->ino_idr_lock);
+		sbi->next_generation++;
+	gen = sbi->next_generation;
+	spin_unlock(&sbi->ino_idr_lock);
 	idr_preload_end();
 
 	if (ret < 0) {
@@ -43,8 +43,8 @@ struct inode *vboxsf_new_inode(struct super_block *sb)
 	return inode;
 }
 
-/* set [inode] attributes based on [info], uid/gid based on [sf_g] */
-void vboxsf_init_inode(struct sf_glob_info *sf_g, struct inode *inode,
+/* set [inode] attributes based on [info], uid/gid based on [sbi] */
+void vboxsf_init_inode(struct vboxsf_sbi *sbi, struct inode *inode,
 		       const struct shfl_fsobjinfo *info)
 {
 	const struct shfl_fsobjattr *attr;
@@ -74,8 +74,8 @@ void vboxsf_init_inode(struct sf_glob_info *sf_g, struct inode *inode,
 	inode->i_mapping->a_ops = &vboxsf_reg_aops;
 
 	if (SHFL_IS_DIRECTORY(attr->mode)) {
-		inode->i_mode = sf_g->o.dmode_set ? sf_g->o.dmode : mode;
-		inode->i_mode &= ~sf_g->o.dmask;
+		inode->i_mode = sbi->o.dmode_set ? sbi->o.dmode : mode;
+		inode->i_mode &= ~sbi->o.dmask;
 		inode->i_mode |= S_IFDIR;
 		inode->i_op = &vboxsf_dir_iops;
 		inode->i_fop = &vboxsf_dir_fops;
@@ -85,22 +85,22 @@ void vboxsf_init_inode(struct sf_glob_info *sf_g, struct inode *inode,
 		 */
 		set_nlink(inode, 1);
 	} else if (SHFL_IS_SYMLINK(attr->mode)) {
-		inode->i_mode = sf_g->o.fmode_set ? sf_g->o.fmode : mode;
-		inode->i_mode &= ~sf_g->o.fmask;
+		inode->i_mode = sbi->o.fmode_set ? sbi->o.fmode : mode;
+		inode->i_mode &= ~sbi->o.fmask;
 		inode->i_mode |= S_IFLNK;
 		inode->i_op = &vboxsf_lnk_iops;
 		set_nlink(inode, 1);
 	} else {
-		inode->i_mode = sf_g->o.fmode_set ? sf_g->o.fmode : mode;
-		inode->i_mode &= ~sf_g->o.fmask;
+		inode->i_mode = sbi->o.fmode_set ? sbi->o.fmode : mode;
+		inode->i_mode &= ~sbi->o.fmask;
 		inode->i_mode |= S_IFREG;
 		inode->i_op = &vboxsf_reg_iops;
 		inode->i_fop = &vboxsf_reg_fops;
 		set_nlink(inode, 1);
 	}
 
-	inode->i_uid = sf_g->o.uid;
-	inode->i_gid = sf_g->o.gid;
+	inode->i_uid = sbi->o.uid;
+	inode->i_gid = sbi->o.gid;
 
 	inode->i_size = info->size;
 	inode->i_blkbits = 12;
@@ -120,21 +120,21 @@ void vboxsf_init_inode(struct sf_glob_info *sf_g, struct inode *inode,
 int vboxsf_create_at_dentry(struct dentry *dentry,
 			    struct shfl_createparms *params)
 {
-	struct sf_glob_info *sf_g = GET_GLOB_INFO(dentry->d_sb);
+	struct vboxsf_sbi *sbi = VBOXSF_SBI(dentry->d_sb);
 	struct shfl_string *path;
 	int err;
 
-	path = vboxsf_path_from_dentry(sf_g, dentry);
+	path = vboxsf_path_from_dentry(sbi, dentry);
 	if (IS_ERR(path))
 		return PTR_ERR(path);
 
-	err = vboxsf_create(sf_g->root, path, params);
+	err = vboxsf_create(sbi->root, path, params);
 	__putname(path);
 
 	return err;
 }
 
-int vboxsf_stat(struct sf_glob_info *sf_g, struct shfl_string *path,
+int vboxsf_stat(struct vboxsf_sbi *sbi, struct shfl_string *path,
 		struct shfl_fsobjinfo *info)
 {
 	struct shfl_createparms params = {};
@@ -143,7 +143,7 @@ int vboxsf_stat(struct sf_glob_info *sf_g, struct shfl_string *path,
 	params.handle = SHFL_HANDLE_NIL;
 	params.create_flags = SHFL_CF_LOOKUP | SHFL_CF_ACT_FAIL_IF_NEW;
 
-	err = vboxsf_create(sf_g->root, path, &params);
+	err = vboxsf_create(sbi->root, path, &params);
 	if (err)
 		return err;
 
@@ -158,22 +158,22 @@ int vboxsf_stat(struct sf_glob_info *sf_g, struct shfl_string *path,
 
 int vboxsf_stat_dentry(struct dentry *dentry, struct shfl_fsobjinfo *info)
 {
-	struct sf_glob_info *sf_g = GET_GLOB_INFO(dentry->d_sb);
+	struct vboxsf_sbi *sbi = VBOXSF_SBI(dentry->d_sb);
 	struct shfl_string *path;
 	int err;
 
-	path = vboxsf_path_from_dentry(sf_g, dentry);
+	path = vboxsf_path_from_dentry(sbi, dentry);
 	if (IS_ERR(path))
 		return PTR_ERR(path);
 
-	err = vboxsf_stat(sf_g, path, info);
+	err = vboxsf_stat(sbi, path, info);
 	__putname(path);
 	return err;
 }
 
 int vboxsf_inode_revalidate(struct dentry *dentry)
 {
-	struct sf_glob_info *sf_g = GET_GLOB_INFO(dentry->d_sb);
+	struct vboxsf_sbi *sbi = VBOXSF_SBI(dentry->d_sb);
 	struct vboxsf_inode *sf_i;
 	struct shfl_fsobjinfo info;
 	struct timespec64 prev_mtime;
@@ -185,9 +185,9 @@ int vboxsf_inode_revalidate(struct dentry *dentry)
 
 	inode = d_inode(dentry);
 	prev_mtime = inode->i_mtime;
-	sf_i = GET_INODE_INFO(inode);
+	sf_i = VBOXSF_I(inode);
 	if (!sf_i->force_restat) {
-		if (time_before(jiffies, dentry->d_time + sf_g->o.ttl))
+		if (time_before(jiffies, dentry->d_time + sbi->o.ttl))
 			return 0;
 	}
 
@@ -197,7 +197,7 @@ int vboxsf_inode_revalidate(struct dentry *dentry)
 
 	dentry->d_time = jiffies;
 	sf_i->force_restat = 0;
-	vboxsf_init_inode(sf_g, inode, &info);
+	vboxsf_init_inode(sbi, inode, &info);
 
 	/*
 	 * mmap()-ed files use the page-cache, if the file was changed on the
@@ -216,7 +216,7 @@ int vboxsf_getattr(const struct path *path, struct kstat *kstat,
 	int err;
 	struct dentry *dentry = path->dentry;
 	struct inode *inode = d_inode(dentry);
-	struct vboxsf_inode *sf_i = GET_INODE_INFO(inode);
+	struct vboxsf_inode *sf_i = VBOXSF_I(inode);
 
 	switch (flags & AT_STATX_SYNC_TYPE) {
 	case AT_STATX_DONT_SYNC:
@@ -237,8 +237,8 @@ int vboxsf_getattr(const struct path *path, struct kstat *kstat,
 
 int vboxsf_setattr(struct dentry *dentry, struct iattr *iattr)
 {
-	struct vboxsf_inode *sf_i = GET_INODE_INFO(d_inode(dentry));
-	struct sf_glob_info *sf_g = GET_GLOB_INFO(dentry->d_sb);
+	struct vboxsf_inode *sf_i = VBOXSF_I(d_inode(dentry));
+	struct vboxsf_sbi *sbi = VBOXSF_SBI(dentry->d_sb);
 	struct shfl_createparms params = {};
 	struct shfl_fsobjinfo info = {};
 	uint32_t buf_len;
@@ -295,11 +295,11 @@ int vboxsf_setattr(struct dentry *dentry, struct iattr *iattr)
 		 */
 
 		buf_len = sizeof(info);
-		err = vboxsf_fsinfo(sf_g->root, params.handle,
+		err = vboxsf_fsinfo(sbi->root, params.handle,
 				   SHFL_INFO_SET | SHFL_INFO_FILE, &buf_len,
 				   &info);
 		if (err) {
-			vboxsf_close(sf_g->root, params.handle);
+			vboxsf_close(sbi->root, params.handle);
 			return err;
 		}
 
@@ -313,11 +313,11 @@ int vboxsf_setattr(struct dentry *dentry, struct iattr *iattr)
 		memset(&info, 0, sizeof(info));
 		info.size = iattr->ia_size;
 		buf_len = sizeof(info);
-		err = vboxsf_fsinfo(sf_g->root, params.handle,
+		err = vboxsf_fsinfo(sbi->root, params.handle,
 				   SHFL_INFO_SET | SHFL_INFO_SIZE, &buf_len,
 				   &info);
 		if (err) {
-			vboxsf_close(sf_g->root, params.handle);
+			vboxsf_close(sbi->root, params.handle);
 			return err;
 		}
 
@@ -325,7 +325,7 @@ int vboxsf_setattr(struct dentry *dentry, struct iattr *iattr)
 		sf_i->force_restat = 1;
 	}
 
-	vboxsf_close(sf_g->root, params.handle);
+	vboxsf_close(sbi->root, params.handle);
 
 	/* Update the inode with what the host has actually given us. */
 	if (sf_i->force_restat)
@@ -336,11 +336,11 @@ int vboxsf_setattr(struct dentry *dentry, struct iattr *iattr)
 
 /*
  * [dentry] contains string encoded in coding system that corresponds
- * to [sf_g]->nls, we must convert it to UTF8 here.
+ * to [sbi]->nls, we must convert it to UTF8 here.
  * Returns a shfl_string allocated through __getname (must be freed using
  * __putname), or an ERR_PTR on error.
  */
-struct shfl_string *vboxsf_path_from_dentry(struct sf_glob_info *sf_g,
+struct shfl_string *vboxsf_path_from_dentry(struct vboxsf_sbi *sbi,
 					    struct dentry *dentry)
 {
 	struct shfl_string *shfl_path;
@@ -360,7 +360,7 @@ struct shfl_string *vboxsf_path_from_dentry(struct sf_glob_info *sf_g,
 	}
 	path_len = strlen(path);
 
-	if (sf_g->nls) {
+	if (sbi->nls) {
 		shfl_path = __getname();
 		if (!shfl_path) {
 			__putname(buf);
@@ -371,7 +371,7 @@ struct shfl_string *vboxsf_path_from_dentry(struct sf_glob_info *sf_g,
 		out_len = PATH_MAX - SHFLSTRING_HEADER_SIZE - 1;
 
 		while (path_len) {
-			nb = sf_g->nls->char2uni(path, path_len, &uni);
+			nb = sbi->nls->char2uni(path, path_len, &uni);
 			if (nb < 0) {
 				__putname(shfl_path);
 				__putname(buf);
@@ -412,7 +412,7 @@ struct shfl_string *vboxsf_path_from_dentry(struct sf_glob_info *sf_g,
 	return shfl_path;
 }
 
-int vboxsf_nlscpy(struct sf_glob_info *sf_g, char *name, size_t name_bound_len,
+int vboxsf_nlscpy(struct vboxsf_sbi *sbi, char *name, size_t name_bound_len,
 		  const unsigned char *utf8_name, size_t utf8_len)
 {
 	const char *in;
@@ -440,7 +440,7 @@ int vboxsf_nlscpy(struct sf_glob_info *sf_g, char *name, size_t name_bound_len,
 		in += nb;
 		in_bound_len -= nb;
 
-		nb = sf_g->nls->uni2char(uni, out, out_bound_len);
+		nb = sbi->nls->uni2char(uni, out, out_bound_len);
 		if (nb < 0)
 			return nb;
 
@@ -509,7 +509,7 @@ void vboxsf_dir_info_free(struct vboxsf_dir_info *p)
 	kfree(p);
 }
 
-int vboxsf_dir_read_all(struct sf_glob_info *sf_g, struct vboxsf_dir_info *sf_d,
+int vboxsf_dir_read_all(struct vboxsf_sbi *sbi, struct vboxsf_dir_info *sf_d,
 			u64 handle)
 {
 	struct vboxsf_dir_buf *b;
@@ -528,7 +528,7 @@ int vboxsf_dir_read_all(struct sf_glob_info *sf_g, struct vboxsf_dir_info *sf_d,
 		buf = b->buf;
 		size = b->free;
 
-		err = vboxsf_dirinfo(sf_g->root, handle, NULL, 0, 0,
+		err = vboxsf_dirinfo(sbi->root, handle, NULL, 0, 0,
 				     &size, buf, &entries);
 		if (err < 0)
 			break;
