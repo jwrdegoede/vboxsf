@@ -235,7 +235,7 @@ fail_free:
 
 static void vboxsf_inode_init_once(void *data)
 {
-	struct vboxsf_inode *sf_i = (struct vboxsf_inode *)data;
+	struct vboxsf_inode *sf_i = data;
 
 	mutex_init(&sf_i->handle_list_mutex);
 	inode_init_once(&sf_i->vfs_inode);

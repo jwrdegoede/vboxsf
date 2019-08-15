@@ -25,20 +25,26 @@ static int vboxsf_dir_open(struct inode *inode, struct file *file)
 			      SHFL_CF_ACT_FAIL_IF_NEW | SHFL_CF_ACCESS_READ;
 
 	err = vboxsf_create_at_dentry(file_dentry(file), &params);
-	if (err == 0) {
-		if (params.result == SHFL_FILE_EXISTS) {
-			err = vboxsf_dir_read_all(sbi, sf_d, params.handle);
-			if (!err)
-				file->private_data = sf_d;
-		} else
-			err = -ENOENT;
+	if (err)
+		goto err_free_dir_info;
 
-		vboxsf_close(sbi->root, params.handle);
+	if (params.result != SHFL_FILE_EXISTS) {
+		err = -ENOENT;
+		goto err_close;
 	}
 
+	err = vboxsf_dir_read_all(sbi, sf_d, params.handle);
 	if (err)
-		vboxsf_dir_info_free(sf_d);
+		goto err_close;
 
+	vboxsf_close(sbi->root, params.handle);
+	file->private_data = sf_d;
+	return 0;
+
+err_close:
+	vboxsf_close(sbi->root, params.handle);
+err_free_dir_info:
+	vboxsf_dir_info_free(sf_d);
 	return err;
 }
 
@@ -341,8 +347,8 @@ static int vboxsf_dir_rename(struct inode *old_parent,
 
 	new_path = vboxsf_path_from_dentry(sbi, new_dentry);
 	if (IS_ERR(new_path)) {
-		__putname(old_path);
-		return PTR_ERR(new_path);
+		err = PTR_ERR(new_path);
+		goto err_put_old_path;
 	}
 
 	if (d_inode(old_dentry)->i_mode & S_IFDIR)
@@ -356,6 +362,7 @@ static int vboxsf_dir_rename(struct inode *old_parent,
 	}
 
 	__putname(new_path);
+err_put_old_path:
 	__putname(old_path);
 	return err;
 }
