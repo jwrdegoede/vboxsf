@@ -35,7 +35,7 @@ static DEFINE_IDA(vboxsf_bdi_ida);
 static DEFINE_MUTEX(vboxsf_setup_mutex);
 static bool vboxsf_setup_done;
 static struct super_operations vboxsf_super_ops; /* forward declaration */
-static struct kmem_cache *sf_inode_cachep;
+static struct kmem_cache *vboxsf_inode_cachep;
 
 static char * const vboxsf_default_nls = CONFIG_NLS_DEFAULT;
 
@@ -233,7 +233,7 @@ fail_free:
 	return err;
 }
 
-static void sf_inode_init_once(void *data)
+static void vboxsf_inode_init_once(void *data)
 {
 	struct vboxsf_inode *sf_i = (struct vboxsf_inode *)data;
 
@@ -241,11 +241,11 @@ static void sf_inode_init_once(void *data)
 	inode_init_once(&sf_i->vfs_inode);
 }
 
-static struct inode *sf_alloc_inode(struct super_block *sb)
+static struct inode *vboxsf_alloc_inode(struct super_block *sb)
 {
 	struct vboxsf_inode *sf_i;
 
-	sf_i = kmem_cache_alloc(sf_inode_cachep, GFP_NOFS);
+	sf_i = kmem_cache_alloc(vboxsf_inode_cachep, GFP_NOFS);
 	if (!sf_i)
 		return NULL;
 
@@ -255,23 +255,17 @@ static struct inode *sf_alloc_inode(struct super_block *sb)
 	return &sf_i->vfs_inode;
 }
 
-static void sf_i_callback(struct rcu_head *head)
+static void vboxsf_free_inode(struct inode *inode)
 {
-	struct inode *inode = container_of(head, struct inode, i_rcu);
 	struct vboxsf_sbi *sbi = VBOXSF_SBI(inode->i_sb);
 
 	spin_lock(&sbi->ino_idr_lock);
 	idr_remove(&sbi->ino_idr, inode->i_ino);
 	spin_unlock(&sbi->ino_idr_lock);
-	kmem_cache_free(sf_inode_cachep, VBOXSF_I(inode));
+	kmem_cache_free(vboxsf_inode_cachep, VBOXSF_I(inode));
 }
 
-static void sf_destroy_inode(struct inode *inode)
-{
-	call_rcu(&inode->i_rcu, sf_i_callback);
-}
-
-static void sf_put_super(struct super_block *sb)
+static void vboxsf_put_super(struct super_block *sb)
 {
 	struct vboxsf_sbi *sbi = VBOXSF_SBI(sb);
 
@@ -284,7 +278,7 @@ static void sf_put_super(struct super_block *sb)
 	kfree(sbi);
 }
 
-static int sf_statfs(struct dentry *dentry, struct kstatfs *stat)
+static int vboxsf_statfs(struct dentry *dentry, struct kstatfs *stat)
 {
 	struct super_block *sb = dentry->d_sb;
 	struct shfl_volinfo SHFLVolumeInfo;
@@ -324,10 +318,10 @@ static int sf_statfs(struct dentry *dentry, struct kstatfs *stat)
 }
 
 static struct super_operations vboxsf_super_ops = {
-	.alloc_inode	= sf_alloc_inode,
-	.destroy_inode	= sf_destroy_inode,
-	.put_super	= sf_put_super,
-	.statfs		= sf_statfs,
+	.alloc_inode	= vboxsf_alloc_inode,
+	.free_inode	= vboxsf_free_inode,
+	.put_super	= vboxsf_put_super,
+	.statfs		= vboxsf_statfs,
 };
 
 static int vboxsf_setup(void)
@@ -339,12 +333,13 @@ static int vboxsf_setup(void)
 	if (vboxsf_setup_done)
 		goto success;
 
-	sf_inode_cachep = kmem_cache_create("vboxsf_inode_cache",
-					     sizeof(struct vboxsf_inode),
-					     0, (SLAB_RECLAIM_ACCOUNT|
-						SLAB_MEM_SPREAD|SLAB_ACCOUNT),
-					     sf_inode_init_once);
-	if (sf_inode_cachep == NULL) {
+	vboxsf_inode_cachep =
+		kmem_cache_create("vboxsf_inode_cache",
+				  sizeof(struct vboxsf_inode), 0,
+				  (SLAB_RECLAIM_ACCOUNT | SLAB_MEM_SPREAD |
+				   SLAB_ACCOUNT),
+				  vboxsf_inode_init_once);
+	if (vboxsf_inode_cachep == NULL) {
 		err = -ENOMEM;
 		goto fail_nomem;
 	}
@@ -377,7 +372,7 @@ success:
 fail_disconnect:
 	vboxsf_disconnect();
 fail_free_cache:
-	kmem_cache_destroy(sf_inode_cachep);
+	kmem_cache_destroy(vboxsf_inode_cachep);
 fail_nomem:
 	mutex_unlock(&vboxsf_setup_mutex);
 	return err;
@@ -483,7 +478,7 @@ static void __exit vboxsf_fini(void)
 		 * before we destroy the cache.
 		 */
 		rcu_barrier();
-		kmem_cache_destroy(sf_inode_cachep);
+		kmem_cache_destroy(vboxsf_inode_cachep);
 	}
 	mutex_unlock(&vboxsf_setup_mutex);
 }
