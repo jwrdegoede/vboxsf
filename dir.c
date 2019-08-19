@@ -151,12 +151,10 @@ try_next_entry:
 
 			return dir_emit(ctx, d_name, strlen(d_name),
 					fake_ino, d_type);
-		} else {
-			return dir_emit(ctx,
-					info->name.string.utf8,
-					info->name.length,
-					fake_ino, d_type);
 		}
+
+		return dir_emit(ctx, info->name.string.utf8, info->name.length,
+				fake_ino, d_type);
 	}
 
 	return false;

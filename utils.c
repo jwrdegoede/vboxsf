@@ -201,12 +201,12 @@ int vboxsf_inode_revalidate(struct dentry *dentry)
 	vboxsf_init_inode(sbi, inode, &info);
 
 	/*
-	 * mmap()-ed files use the page-cache, if the file was changed on the
-	 * host side we need to invalidate the page-cache for it.  Note this
-	 * also gets triggered by our own writes, this is unavoidable.
+	 * If the file was changed on the host side we need to invalidate the
+	 * page-cache for it.  Note this also gets triggered by our own writes,
+	 * this is unavoidable.
 	 */
 	if (timespec64_compare(&inode->i_mtime, &prev_mtime) > 0)
-		invalidate_mapping_pages(inode->i_mapping, 0, -1);
+		invalidate_inode_pages2(inode->i_mapping);
 
 	return 0;
 }

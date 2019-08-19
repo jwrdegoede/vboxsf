@@ -119,6 +119,10 @@ static int vboxsf_file_release(struct inode *inode, struct file *file)
 	struct vboxsf_inode *sf_i = VBOXSF_I(inode);
 	struct vboxsf_handle *sf_handle = file->private_data;
 
+	/*
+	 * When a file is closed on our (the guest) side, we want any subsequent
+	 * accesses done on the host side to see all changes done from our side.
+	 */
 	filemap_write_and_wait(inode->i_mapping);
 
 	mutex_lock(&sf_i->handle_list_mutex);
@@ -126,7 +130,6 @@ static int vboxsf_file_release(struct inode *inode, struct file *file)
 	mutex_unlock(&sf_i->handle_list_mutex);
 
 	kref_put(&sf_handle->refcount, vboxsf_handle_release);
-	file->private_data = NULL;
 	return 0;
 }
 
@@ -160,25 +163,34 @@ static int vboxsf_file_mmap(struct file *file, struct vm_area_struct *vma)
  * Note that since we are accessing files on the host's filesystem, files
  * may always be changed underneath us by the host!
  *
+ * The vboxsf API between the guest and the host does not offer any functions
+ * to deal with this. There is no inode-generation to check for changes, no
+ * events / callback on changes and no way to lock files.
+ *
  * To avoid returning stale data when a file gets *opened* on our (the guest)
  * side, we do a "stat" on the host side, then compare the mtime with the
  * last known mtime and invalidate the page-cache if they differ.
  * This is done from vboxsf_inode_revalidate().
  *
- * Ideally we would wrap generic_file_read_iter with a function which also
- * does this check, to reduce the chance of us missing writes happening on the
- * host side after open(). But the vboxsf stat call to the host only works on
- * filenames, so that would require caching the filename in our
- * file->private_data and there is no guarantee that filename will still
- * be valid at read_iter time. So this would be in no way bulletproof.
+ * When reads are done through the read_iter fop, it is possible to do
+ * further cache revalidation then, there are 3 options to deal with this:
  *
- * Also such a check will not help with returning stale data from reads done
- * through mmap accesses.
+ * 1)  Rely solely on the revalidation done at open time
+ * 2)  Do another "stat" and compare mtime again. Unfortunately the vboxsf
+ *     host API does not allow stat on handles, so we would need to use
+ *     file->f_path.dentry and the stat will then fail if the file was unlinked
+ *     or renamed (and there is no thing like NFS' silly-rename). So we get:
+ * 2a) "stat" and compare mtime, on stat failure invalidate the cache
+ * 2b) "stat" and compare mtime, on stat failure do nothing
+ * 3)  Simply always call invalidate_inode_pages2_range on the range of the read
  *
- * So we are keeping things KISS and directly using generic_file_read_iter
- * without a wrapper, thus providing the same staleness guarantees for
- * read() and mmap() accesses: Only data written on the host side before
- * open() on the guest side is guaranteed to be seen by the guest.
+ * Currently we are keeping things KISS and using option 1. this allows
+ * directly using generic_file_read_iter without wrapping it.
+ *
+ * This means that only data written on the host side before open() on
+ * the guest side is guaranteed to be seen by the guest. If necessary
+ * we may provide other read-cache strategies in the future and make this
+ * configurable through a mount option.
  */
 const struct file_operations vboxsf_reg_fops = {
 	.llseek = generic_file_llseek,
