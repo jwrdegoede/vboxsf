@@ -297,7 +297,7 @@ static int vboxsf_dir_unlink(struct inode *parent, struct dentry *dentry)
 	struct vboxsf_inode *sf_parent_i = VBOXSF_I(parent);
 	struct inode *inode = d_inode(dentry);
 	struct shfl_string *path;
-	uint32_t flags;
+	u32 flags;
 	int err;
 
 	if (S_ISDIR(inode->i_mode))

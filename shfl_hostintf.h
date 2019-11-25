@@ -44,7 +44,7 @@ enum {
 	SHFL_FN_MAP_FOLDER = 17,	/* Map folder */
 	SHFL_FN_READLINK = 18,		/* Read symlink dest (as of VBox 4.0) */
 	SHFL_FN_SYMLINK = 19,		/* Create symlink (as of VBox 4.0) */
-	SHFL_FN_SET_SYMLINKS = 20,	/* Ask host to show symlinks (as of 4.0) */
+	SHFL_FN_SET_SYMLINKS = 20,	/* Ask host to show symlinks (4.0+) */
 };
 
 /* Root handles for a mapping are of type u32, Root handles are unique. */

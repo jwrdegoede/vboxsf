@@ -298,6 +298,10 @@ static int vboxsf_write_end(struct file *file, struct address_space *mapping,
 	u8 *buf;
 	int err;
 
+	/* zero the stale part of the page if we did a short copy */
+	if (!PageUptodate(page) && copied < len)
+		zero_user(page, from + copied, len - copied);
+
 	buf = kmap(page);
 	err = vboxsf_write(sf_handle->root, sf_handle->handle,
 			   pos, &nwritten, buf + from);
@@ -325,6 +329,11 @@ out:
 	return nwritten;
 }
 
+/*
+ * Note simple_write_begin does not read the page from disk on partial writes
+ * this is ok since vboxsf_write_end only writes the written parts of the
+ * page and it does not call SetPageUptodate for partial writes.
+ */
 const struct address_space_operations vboxsf_reg_aops = {
 	.readpage = vboxsf_readpage,
 	.writepage = vboxsf_writepage,

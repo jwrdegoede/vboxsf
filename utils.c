@@ -174,7 +174,7 @@ int vboxsf_stat_dentry(struct dentry *dentry, struct shfl_fsobjinfo *info)
 
 int vboxsf_inode_revalidate(struct dentry *dentry)
 {
-	struct vboxsf_sbi *sbi = VBOXSF_SBI(dentry->d_sb);
+	struct vboxsf_sbi *sbi;
 	struct vboxsf_inode *sf_i;
 	struct shfl_fsobjinfo info;
 	struct timespec64 prev_mtime;
@@ -187,6 +187,7 @@ int vboxsf_inode_revalidate(struct dentry *dentry)
 	inode = d_inode(dentry);
 	prev_mtime = inode->i_mtime;
 	sf_i = VBOXSF_I(inode);
+	sbi = VBOXSF_SBI(dentry->d_sb);
 	if (!sf_i->force_restat) {
 		if (time_before(jiffies, dentry->d_time + sbi->o.ttl))
 			return 0;
@@ -242,7 +243,7 @@ int vboxsf_setattr(struct dentry *dentry, struct iattr *iattr)
 	struct vboxsf_sbi *sbi = VBOXSF_SBI(dentry->d_sb);
 	struct shfl_createparms params = {};
 	struct shfl_fsobjinfo info = {};
-	uint32_t buf_len;
+	u32 buf_len;
 	int err;
 
 	params.handle = SHFL_HANDLE_NIL;
@@ -297,8 +298,8 @@ int vboxsf_setattr(struct dentry *dentry, struct iattr *iattr)
 
 		buf_len = sizeof(info);
 		err = vboxsf_fsinfo(sbi->root, params.handle,
-				   SHFL_INFO_SET | SHFL_INFO_FILE, &buf_len,
-				   &info);
+				    SHFL_INFO_SET | SHFL_INFO_FILE, &buf_len,
+				    &info);
 		if (err) {
 			vboxsf_close(sbi->root, params.handle);
 			return err;
@@ -315,8 +316,8 @@ int vboxsf_setattr(struct dentry *dentry, struct iattr *iattr)
 		info.size = iattr->ia_size;
 		buf_len = sizeof(info);
 		err = vboxsf_fsinfo(sbi->root, params.handle,
-				   SHFL_INFO_SET | SHFL_INFO_SIZE, &buf_len,
-				   &info);
+				    SHFL_INFO_SET | SHFL_INFO_SIZE, &buf_len,
+				    &info);
 		if (err) {
 			vboxsf_close(sbi->root, params.handle);
 			return err;

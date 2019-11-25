@@ -10,7 +10,6 @@
 
 #include <linux/backing-dev.h>
 #include <linux/idr.h>
-#include <linux/version.h>
 #include "shfl_hostintf.h"
 
 #define DIR_BUFFER_SIZE SZ_16K
@@ -41,7 +40,7 @@ struct vboxsf_sbi {
 	struct vboxsf_options o;
 	struct shfl_fsobjinfo root_info;
 	struct idr ino_idr;
-	spinlock_t ino_idr_lock;
+	spinlock_t ino_idr_lock; /* This protects ino_idr */
 	struct nls_table *nls;
 	u32 next_generation;
 	u32 root;
@@ -54,6 +53,7 @@ struct vboxsf_inode {
 	int force_restat;
 	/* list of open handles for this inode + lock protecting it */
 	struct list_head handle_list;
+	/* This mutex protects handle_list accesses */
 	struct mutex handle_list_mutex;
 	/* The VFS inode struct */
 	struct inode vfs_inode;

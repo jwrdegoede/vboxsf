@@ -176,8 +176,10 @@ static int vboxsf_fill_super(struct super_block *sb, struct fs_context *fc)
 	/* Turn source into a shfl_string and map the folder */
 	size = strlen(fc->source) + 1;
 	folder_name = kmalloc(SHFLSTRING_HEADER_SIZE + size, GFP_KERNEL);
-	if (!folder_name)
+	if (!folder_name) {
+		err = -ENOMEM;
 		goto fail_free;
+	}
 	folder_name->size = size;
 	folder_name->length = size - 1;
 	strlcpy(folder_name->string.utf8, fc->source, size);
@@ -275,6 +277,12 @@ static void vboxsf_put_super(struct super_block *sb)
 		ida_simple_remove(&vboxsf_bdi_ida, sbi->bdi_id);
 	if (sbi->nls)
 		unload_nls(sbi->nls);
+
+	/*
+	 * vboxsf_free_inode uses the idr, make sure all delayed rcu free
+	 * inodes are flushed.
+	 */
+	rcu_barrier();
 	idr_destroy(&sbi->ino_idr);
 	kfree(sbi);
 }
@@ -282,29 +290,29 @@ static void vboxsf_put_super(struct super_block *sb)
 static int vboxsf_statfs(struct dentry *dentry, struct kstatfs *stat)
 {
 	struct super_block *sb = dentry->d_sb;
-	struct shfl_volinfo SHFLVolumeInfo;
+	struct shfl_volinfo shfl_volinfo;
 	struct vboxsf_sbi *sbi;
 	u32 buf_len;
 	int err;
 
 	sbi = VBOXSF_SBI(sb);
-	buf_len = sizeof(SHFLVolumeInfo);
+	buf_len = sizeof(shfl_volinfo);
 	err = vboxsf_fsinfo(sbi->root, 0, SHFL_INFO_GET | SHFL_INFO_VOLUME,
-			    &buf_len, &SHFLVolumeInfo);
+			    &buf_len, &shfl_volinfo);
 	if (err)
 		return err;
 
 	stat->f_type = VBOXSF_SUPER_MAGIC;
-	stat->f_bsize = SHFLVolumeInfo.bytes_per_allocation_unit;
+	stat->f_bsize = shfl_volinfo.bytes_per_allocation_unit;
 
-	do_div(SHFLVolumeInfo.total_allocation_bytes,
-	       SHFLVolumeInfo.bytes_per_allocation_unit);
-	stat->f_blocks = SHFLVolumeInfo.total_allocation_bytes;
+	do_div(shfl_volinfo.total_allocation_bytes,
+	       shfl_volinfo.bytes_per_allocation_unit);
+	stat->f_blocks = shfl_volinfo.total_allocation_bytes;
 
-	do_div(SHFLVolumeInfo.available_allocation_bytes,
-	       SHFLVolumeInfo.bytes_per_allocation_unit);
-	stat->f_bfree  = SHFLVolumeInfo.available_allocation_bytes;
-	stat->f_bavail = SHFLVolumeInfo.available_allocation_bytes;
+	do_div(shfl_volinfo.available_allocation_bytes,
+	       shfl_volinfo.bytes_per_allocation_unit);
+	stat->f_bfree  = shfl_volinfo.available_allocation_bytes;
+	stat->f_bavail = shfl_volinfo.available_allocation_bytes;
 
 	stat->f_files = 1000;
 	/*
@@ -340,7 +348,7 @@ static int vboxsf_setup(void)
 				  (SLAB_RECLAIM_ACCOUNT | SLAB_MEM_SPREAD |
 				   SLAB_ACCOUNT),
 				  vboxsf_inode_init_once);
-	if (vboxsf_inode_cachep == NULL) {
+	if (!vboxsf_inode_cachep) {
 		err = -ENOMEM;
 		goto fail_nomem;
 	}
@@ -379,7 +387,7 @@ fail_nomem:
 	return err;
 }
 
-int vboxsf_parse_monolithic(struct fs_context *fc, void *data)
+static int vboxsf_parse_monolithic(struct fs_context *fc, void *data)
 {
 	char *options = data;
 
